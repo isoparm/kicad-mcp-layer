@@ -1,0 +1,1726 @@
+{
+    "$schema": "https://schemas.kicad.org/drc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-09-04T03:23:57",
+    "ignored_checks": [
+        {
+            "description": "Footprint has no courtyard defined",
+            "key": "missing_courtyard"
+        },
+        {
+            "description": "Track endpoint not centered on via",
+            "key": "track_not_centered_on_via"
+        },
+        {
+            "description": "Tuning profile track geometries",
+            "key": "tuning_profile_track_geometries"
+        },
+        {
+            "description": "Footprint doesn't match symbol's footprint filters",
+            "key": "footprint_filters_mismatch"
+        },
+        {
+            "description": "PTH inside courtyard",
+            "key": "pth_inside_courtyard"
+        },
+        {
+            "description": "NPTH inside courtyard",
+            "key": "npth_inside_courtyard"
+        },
+        {
+            "description": "Footprint component type doesn't match footprint pads",
+            "key": "footprint_type_mismatch"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning"
+    ],
+    "kicad_version": "10.0.6",
+    "schematic_parity": [],
+    "source": "multichannel_mixer.kicad_pcb",
+    "unconnected_items": [],
+    "violations": [
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2000 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 3 [Net-(C8-Pad1)] of RV2",
+                    "pos": {
+                        "x": 147.5,
+                        "y": 97.4
+                    },
+                    "uuid": "e4e5d5bd-087d-4f10-b611-cdc157b4ed34"
+                },
+                {
+                    "description": "Track [Net-(IC2B-IN-)] on B.Cu, length 4.0000 mm",
+                    "pos": {
+                        "x": 148.85,
+                        "y": 94.85
+                    },
+                    "uuid": "fac33179-5cf1-4305-9537-1f9ff224022b"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2000 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 3 [Net-(C16-Pad1)] of RV5",
+                    "pos": {
+                        "x": 125.5,
+                        "y": 115.4
+                    },
+                    "uuid": "008930d5-7b48-42bf-b13f-311d1e280276"
+                },
+                {
+                    "description": "Track [Net-(IC3B-IN-)] on B.Cu, length 3.1820 mm",
+                    "pos": {
+                        "x": 124.8,
+                        "y": 112.790811
+                    },
+                    "uuid": "e83b3677-58bd-4085-9636-415bcf65c5ea"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2000 mm)",
+            "items": [
+                {
+                    "description": "Track [Net-(IC5B-IN-)] on B.Cu, length 4.0000 mm",
+                    "pos": {
+                        "x": 104.85,
+                        "y": 94.85
+                    },
+                    "uuid": "d71ff7ac-699f-40cb-a02c-76b813f8eac5"
+                },
+                {
+                    "description": "PTH pad 3 [Net-(C35-Pad1)] of RV14",
+                    "pos": {
+                        "x": 103.5,
+                        "y": 97.4
+                    },
+                    "uuid": "e1268511-38a2-4617-acaf-78b41eeb61dd"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2250 mm)",
+            "items": [
+                {
+                    "description": "Pad 1 [Net-(C7-Pad1)] of C7 on B.Cu",
+                    "pos": {
+                        "x": 148.0,
+                        "y": 117.9
+                    },
+                    "uuid": "1fdc0925-4977-48de-8f48-b31b544dfc16"
+                },
+                {
+                    "description": "Track [Net-(IC2B-IN-)] on B.Cu, length 4.4592 mm",
+                    "pos": {
+                        "x": 149.05,
+                        "y": 115.040811
+                    },
+                    "uuid": "5c1225c8-8457-4dda-847b-ddd28aeb8ba5"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2000 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 3 [Net-(C34-Pad1)] of RV13",
+                    "pos": {
+                        "x": 103.5,
+                        "y": 115.4
+                    },
+                    "uuid": "249097c3-dd24-43de-86a1-ed026ed338a8"
+                },
+                {
+                    "description": "Track [Net-(IC5B-IN-)] on B.Cu, length 3.1820 mm",
+                    "pos": {
+                        "x": 102.8,
+                        "y": 112.790811
+                    },
+                    "uuid": "514ea747-a87c-4c1b-b13f-9bc09cdb41c3"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2296 mm)",
+            "items": [
+                {
+                    "description": "Track [Net-(IC5B-IN-)] on B.Cu, length 4.4592 mm",
+                    "pos": {
+                        "x": 105.05,
+                        "y": 115.040811
+                    },
+                    "uuid": "5d5e3e33-529d-4437-a2f8-7a6e454e480d"
+                },
+                {
+                    "description": "Pad 1 [GND] of C38 on B.Cu",
+                    "pos": {
+                        "x": 106.4,
+                        "y": 114.3
+                    },
+                    "uuid": "d0484e9e-30b1-4e13-9b17-4520fb4cfa0d"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2000 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 3 [Net-(C26-Pad1)] of RV10",
+                    "pos": {
+                        "x": 169.5,
+                        "y": 97.4
+                    },
+                    "uuid": "85ad2ea7-fef4-476d-8b15-a1af46ae8cb5"
+                },
+                {
+                    "description": "Track [Net-(IC4B-IN-)] on B.Cu, length 4.0000 mm",
+                    "pos": {
+                        "x": 170.85,
+                        "y": 94.85
+                    },
+                    "uuid": "e45a3336-bddc-4417-9324-8ee309a130a2"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2250 mm)",
+            "items": [
+                {
+                    "description": "Track [Net-(IC4B-IN-)] on B.Cu, length 4.4592 mm",
+                    "pos": {
+                        "x": 171.05,
+                        "y": 115.040811
+                    },
+                    "uuid": "836554a5-8efa-4d18-8b92-bf428c726335"
+                },
+                {
+                    "description": "Pad 1 [Net-(C25-Pad1)] of C25 on B.Cu",
+                    "pos": {
+                        "x": 170.0,
+                        "y": 117.9
+                    },
+                    "uuid": "c0fbdbd0-0902-4755-8934-d7f711452a21"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2000 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 3 [Net-(C25-Pad1)] of RV9",
+                    "pos": {
+                        "x": 169.5,
+                        "y": 115.4
+                    },
+                    "uuid": "36231006-0636-47a4-ae91-cccda7a91290"
+                },
+                {
+                    "description": "Track [Net-(IC4B-IN-)] on B.Cu, length 3.1820 mm",
+                    "pos": {
+                        "x": 168.8,
+                        "y": 112.790811
+                    },
+                    "uuid": "505639db-b499-4543-81ee-373c6f290e28"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2000 mm)",
+            "items": [
+                {
+                    "description": "PTH pad 3 [Net-(C17-Pad1)] of RV6",
+                    "pos": {
+                        "x": 125.5,
+                        "y": 97.4
+                    },
+                    "uuid": "6e42a5c3-10ba-418f-a1b2-467ad3485314"
+                },
+                {
+                    "description": "Track [Net-(IC3B-IN-)] on B.Cu, length 4.0000 mm",
+                    "pos": {
+                        "x": 126.85,
+                        "y": 94.85
+                    },
+                    "uuid": "f357e3fe-11b1-4925-af36-2f83412c2bfb"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2296 mm)",
+            "items": [
+                {
+                    "description": "Track [Net-(IC3B-IN-)] on B.Cu, length 4.4592 mm",
+                    "pos": {
+                        "x": 127.05,
+                        "y": 115.040811
+                    },
+                    "uuid": "548c31ee-5151-4b2d-89b3-be2a4de72795"
+                },
+                {
+                    "description": "Pad 1 [GND] of C20 on B.Cu",
+                    "pos": {
+                        "x": 128.4,
+                        "y": 114.3
+                    },
+                    "uuid": "59377a8f-b2ae-4f06-9323-9177ac55180a"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (board minimum clearance 0.3000 mm; actual 0.2296 mm)",
+            "items": [
+                {
+                    "description": "Pad 1 [GND] of C11 on B.Cu",
+                    "pos": {
+                        "x": 150.4,
+                        "y": 114.3
+                    },
+                    "uuid": "40967179-725d-4b9f-85c4-a62d4bfc9e2a"
+                },
+                {
+                    "description": "Track [Net-(IC2B-IN-)] on B.Cu, length 3.1820 mm",
+                    "pos": {
+                        "x": 146.8,
+                        "y": 112.790811
+                    },
+                    "uuid": "4e9d4b3d-9d86-404b-bcec-dda2bc8a2ede"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Copper connection too narrow (board setup constraints minimum connection width 0.3000 mm; actual 0.2490 mm) (B.Cu)",
+            "items": [
+                {
+                    "description": "Zone [GND] on F.Cu and B.Cu, priority 1",
+                    "pos": {
+                        "x": 199.46,
+                        "y": 154.66
+                    },
+                    "uuid": "2a2e83ed-a77d-476f-8432-6de9bc7f83ed"
+                }
+            ],
+            "severity": "warning",
+            "type": "connection_width"
+        },
+        {
+            "description": "Copper connection too narrow (board setup constraints minimum connection width 0.3000 mm; actual 0.2490 mm) (B.Cu)",
+            "items": [
+                {
+                    "description": "Zone [GND] on F.Cu and B.Cu, priority 1",
+                    "pos": {
+                        "x": 199.46,
+                        "y": 154.66
+                    },
+                    "uuid": "2a2e83ed-a77d-476f-8432-6de9bc7f83ed"
+                }
+            ],
+            "severity": "warning",
+            "type": "connection_width"
+        },
+        {
+            "description": "Copper connection too narrow (board setup constraints minimum connection width 0.3000 mm; actual 0.2490 mm) (B.Cu)",
+            "items": [
+                {
+                    "description": "Zone [GND] on F.Cu and B.Cu, priority 1",
+                    "pos": {
+                        "x": 199.46,
+                        "y": 154.66
+                    },
+                    "uuid": "2a2e83ed-a77d-476f-8432-6de9bc7f83ed"
+                }
+            ],
+            "severity": "warning",
+            "type": "connection_width"
+        },
+        {
+            "description": "Copper connection too narrow (board setup constraints minimum connection width 0.3000 mm; actual 0.2490 mm) (B.Cu)",
+            "items": [
+                {
+                    "description": "Zone [GND] on F.Cu and B.Cu, priority 1",
+                    "pos": {
+                        "x": 199.46,
+                        "y": 154.66
+                    },
+                    "uuid": "2a2e83ed-a77d-476f-8432-6de9bc7f83ed"
+                }
+            ],
+            "severity": "warning",
+            "type": "connection_width"
+        },
+        {
+            "description": "Silkscreen clipped by board edge",
+            "items": [
+                {
+                    "description": "Segment on Edge.Cuts",
+                    "pos": {
+                        "x": 89.46,
+                        "y": 154.66
+                    },
+                    "uuid": "934dde10-2d04-4cc1-8a7d-b02236d5b3e7"
+                },
+                {
+                    "description": "Reference field of J9",
+                    "pos": {
+                        "x": 89.785,
+                        "y": 59.285
+                    },
+                    "uuid": "ab7ba046-f239-4f75-b208-08d8f747ca88"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_edge_clearance"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R39",
+                    "pos": {
+                        "x": 104.4,
+                        "y": 102.8
+                    },
+                    "uuid": "01af1621-bf1e-4866-9afb-fc0ad9d5bbc6"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R34",
+                    "pos": {
+                        "x": 163.0,
+                        "y": 135.9
+                    },
+                    "uuid": "052aaf5b-83a5-4049-a08f-c2580eef5f42"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R14",
+                    "pos": {
+                        "x": 144.95,
+                        "y": 147.4
+                    },
+                    "uuid": "06560235-829d-4551-8d65-a6fb4eccef39"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R16",
+                    "pos": {
+                        "x": 123.0,
+                        "y": 76.4
+                    },
+                    "uuid": "14210547-155e-4bb1-b0ad-9e53eb8cae03"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R41",
+                    "pos": {
+                        "x": 105.0,
+                        "y": 135.9
+                    },
+                    "uuid": "14954005-cbed-4d75-bda3-5270d2adf816"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SOIC127P600X175-8N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint IC1",
+                    "pos": {
+                        "x": 190.335,
+                        "y": 108.24
+                    },
+                    "uuid": "14dcd6b7-28de-486c-87e1-37a918938e53"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R35",
+                    "pos": {
+                        "x": 171.0,
+                        "y": 121.0
+                    },
+                    "uuid": "16c6edfe-2bb5-4c5e-a1ca-6907c3836866"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R44",
+                    "pos": {
+                        "x": 101.0,
+                        "y": 93.0
+                    },
+                    "uuid": "184d662a-7a4c-47db-8ef1-95394cf32e2e"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SOIC127P600X175-8N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint IC5",
+                    "pos": {
+                        "x": 102.365,
+                        "y": 84.1
+                    },
+                    "uuid": "19c0567c-0a4a-44fa-b8ec-1ed930890b86"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R36",
+                    "pos": {
+                        "x": 166.95,
+                        "y": 147.4
+                    },
+                    "uuid": "1b59920a-24f6-41d9-a64a-3553f3bcda5f"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R29",
+                    "pos": {
+                        "x": 170.4,
+                        "y": 100.2
+                    },
+                    "uuid": "1c4af49e-f4b0-46ac-bd9b-d35dc19c5dcf"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R10",
+                    "pos": {
+                        "x": 139.6,
+                        "y": 113.6
+                    },
+                    "uuid": "1f2d6bd6-a730-422e-8cc9-f140d9f88335"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R27",
+                    "pos": {
+                        "x": 167.0,
+                        "y": 76.4
+                    },
+                    "uuid": "24169333-428e-49c7-b66f-35c4efa52831"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R23",
+                    "pos": {
+                        "x": 119.0,
+                        "y": 135.9
+                    },
+                    "uuid": "2aafd3a4-f8da-4ff9-878d-9b4d8096f30e"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R28",
+                    "pos": {
+                        "x": 170.4,
+                        "y": 102.8
+                    },
+                    "uuid": "2c799000-eefd-4892-ab1f-19a5b5305211"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R38",
+                    "pos": {
+                        "x": 101.0,
+                        "y": 76.4
+                    },
+                    "uuid": "32154c45-272a-4f1b-bb92-5e3e80b3ad79"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C9",
+                    "pos": {
+                        "x": 145.0,
+                        "y": 123.7
+                    },
+                    "uuid": "323df3d5-bae3-4268-91ba-132d89edcbb4"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R46",
+                    "pos": {
+                        "x": 105.0,
+                        "y": 121.0
+                    },
+                    "uuid": "34dfb910-53b0-4b9a-a13a-e54ff3969e90"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R4",
+                    "pos": {
+                        "x": 140.0,
+                        "y": 76.4
+                    },
+                    "uuid": "373aed5c-d84d-4434-a21a-a1fd37990ce1"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R3",
+                    "pos": {
+                        "x": 195.5,
+                        "y": 107.79
+                    },
+                    "uuid": "3dbbb966-237a-4622-aa02-da08cfc81215"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C7",
+                    "pos": {
+                        "x": 146.5,
+                        "y": 117.9
+                    },
+                    "uuid": "407e97d0-28fd-4a9b-a8ae-14a9da7a54dd"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C38",
+                    "pos": {
+                        "x": 106.4,
+                        "y": 115.8
+                    },
+                    "uuid": "45b0fdb3-54ad-4dbf-9fdd-67ac6feb56a4"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R2",
+                    "pos": {
+                        "x": 190.22,
+                        "y": 112.76
+                    },
+                    "uuid": "49ef3be0-4ece-4a5f-ab9a-708944544e48"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C20",
+                    "pos": {
+                        "x": 128.4,
+                        "y": 115.8
+                    },
+                    "uuid": "4e148dbd-8a41-4f56-98ac-558d5f41e56c"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R22",
+                    "pos": {
+                        "x": 123.0,
+                        "y": 93.0
+                    },
+                    "uuid": "500921ea-2bff-4724-9bc7-ca47fb4047b0"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C37",
+                    "pos": {
+                        "x": 101.0,
+                        "y": 129.0
+                    },
+                    "uuid": "504a579e-12c6-44fb-9a6d-1bd3435da07a"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R13",
+                    "pos": {
+                        "x": 149.0,
+                        "y": 121.0
+                    },
+                    "uuid": "53c253d1-ba54-4756-96f0-3977856483b2"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C21",
+                    "pos": {
+                        "x": 118.0,
+                        "y": 84.4
+                    },
+                    "uuid": "5c9a6157-411f-4814-a840-f45db3bd67a1"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R18",
+                    "pos": {
+                        "x": 126.4,
+                        "y": 100.2
+                    },
+                    "uuid": "5f2f2e72-b4f0-48f8-9600-a26e5b1810e7"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C19",
+                    "pos": {
+                        "x": 123.0,
+                        "y": 129.0
+                    },
+                    "uuid": "601131b5-abed-4c31-b81b-129a70b9609a"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R17",
+                    "pos": {
+                        "x": 126.4,
+                        "y": 102.8
+                    },
+                    "uuid": "60930032-b855-46a3-bbc6-e08bad17aaa8"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R1",
+                    "pos": {
+                        "x": 182.46,
+                        "y": 106.335
+                    },
+                    "uuid": "73ded116-ec17-44a3-8540-726f02056f23"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C34",
+                    "pos": {
+                        "x": 102.5,
+                        "y": 117.9
+                    },
+                    "uuid": "7ba1f967-07c6-4ba1-b086-ea38f646e227"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R26",
+                    "pos": {
+                        "x": 162.0,
+                        "y": 76.4
+                    },
+                    "uuid": "7e861515-7263-490e-80d3-09de0c031d69"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R40",
+                    "pos": {
+                        "x": 104.4,
+                        "y": 100.2
+                    },
+                    "uuid": "831ecff1-007e-425c-ab59-74bb54693f8a"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C33",
+                    "pos": {
+                        "x": 101.0,
+                        "y": 78.9
+                    },
+                    "uuid": "86f0878d-e211-42c9-8f28-3f34e637d9f0"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C15",
+                    "pos": {
+                        "x": 123.0,
+                        "y": 78.9
+                    },
+                    "uuid": "8b3be304-674f-4346-9088-f2824a10b575"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R8",
+                    "pos": {
+                        "x": 149.0,
+                        "y": 135.9
+                    },
+                    "uuid": "8bc7d5b0-5523-4d7b-a9b5-b4289cd3ac97"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C6",
+                    "pos": {
+                        "x": 145.0,
+                        "y": 78.9
+                    },
+                    "uuid": "91b2213f-b9ab-4ad2-a0fd-8fd5f88b473d"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C25",
+                    "pos": {
+                        "x": 168.5,
+                        "y": 117.9
+                    },
+                    "uuid": "9726dbb5-e10d-4266-af77-5a8834882080"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R21",
+                    "pos": {
+                        "x": 117.6,
+                        "y": 113.6
+                    },
+                    "uuid": "9c8c7ed3-8ed5-4b7c-ba47-a3864f8719c9"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C35",
+                    "pos": {
+                        "x": 98.0,
+                        "y": 102.8
+                    },
+                    "uuid": "9fbf0ea0-a68a-4477-875d-3f2cfebca404"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R25",
+                    "pos": {
+                        "x": 122.95,
+                        "y": 147.4
+                    },
+                    "uuid": "a1e19e00-ec1e-4e62-a79a-d5d8bc7c51ef"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C29",
+                    "pos": {
+                        "x": 172.4,
+                        "y": 115.8
+                    },
+                    "uuid": "a89efda9-2b5b-4faa-bb6b-71e4bfde1edb"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R7",
+                    "pos": {
+                        "x": 148.4,
+                        "y": 100.2
+                    },
+                    "uuid": "a96f0531-d384-43e4-a10d-516be57cf599"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R47",
+                    "pos": {
+                        "x": 100.95,
+                        "y": 147.4
+                    },
+                    "uuid": "a98be734-604b-4016-ba6d-3ec80d0370b2"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C12",
+                    "pos": {
+                        "x": 140.0,
+                        "y": 84.4
+                    },
+                    "uuid": "aed8d622-4e79-4a2a-aa55-3a1f84aa1ab9"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C18",
+                    "pos": {
+                        "x": 123.0,
+                        "y": 123.7
+                    },
+                    "uuid": "b22a69da-8e03-4c59-8458-318c54a251c6"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C16",
+                    "pos": {
+                        "x": 124.5,
+                        "y": 117.9
+                    },
+                    "uuid": "b53efe89-5319-4d1d-ae79-0a838c5684ba"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SOIC127P600X175-8N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint IC4",
+                    "pos": {
+                        "x": 168.365,
+                        "y": 84.1
+                    },
+                    "uuid": "b76db4e3-0b5e-4bd5-97b2-ed27e324688d"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C30",
+                    "pos": {
+                        "x": 162.0,
+                        "y": 84.4
+                    },
+                    "uuid": "c298078b-eebd-4431-b51d-d2ff259a82ff"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SOIC127P600X175-8N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint IC2",
+                    "pos": {
+                        "x": 146.365,
+                        "y": 84.1
+                    },
+                    "uuid": "c2d7b7c0-b75c-42d7-8bae-8ad2a9730652"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C27",
+                    "pos": {
+                        "x": 167.0,
+                        "y": 123.7
+                    },
+                    "uuid": "c4cce067-aec1-4f2e-bc78-a28b95346b98"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R31",
+                    "pos": {
+                        "x": 163.0,
+                        "y": 117.9
+                    },
+                    "uuid": "c5206f3a-84cd-461f-ba85-ad00cf3aa6b6"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C26",
+                    "pos": {
+                        "x": 164.0,
+                        "y": 102.8
+                    },
+                    "uuid": "c6d9f255-50ea-4406-aebd-70af7d9ad596"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R20",
+                    "pos": {
+                        "x": 119.0,
+                        "y": 117.9
+                    },
+                    "uuid": "c77d10ae-eeba-4fb9-8018-538f333ccaaa"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R33",
+                    "pos": {
+                        "x": 167.0,
+                        "y": 93.0
+                    },
+                    "uuid": "c87fd0b6-5316-4467-9ea3-3099c8685480"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C28",
+                    "pos": {
+                        "x": 167.0,
+                        "y": 129.0
+                    },
+                    "uuid": "cbbbcd7a-efd2-4a07-9733-697b8590dfdb"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C17",
+                    "pos": {
+                        "x": 120.0,
+                        "y": 102.8
+                    },
+                    "uuid": "cbcf2fa9-147f-432b-9e68-d36fe9192d5c"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R30",
+                    "pos": {
+                        "x": 171.0,
+                        "y": 135.9
+                    },
+                    "uuid": "d1a4e9b8-ed4c-46fa-812e-5cfbf1c4a965"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R43",
+                    "pos": {
+                        "x": 95.6,
+                        "y": 113.6
+                    },
+                    "uuid": "d1f8f3cd-2232-4231-a37b-801cb6df863e"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R6",
+                    "pos": {
+                        "x": 148.4,
+                        "y": 102.8
+                    },
+                    "uuid": "d2b6fd9e-e685-45fe-87eb-93a1f78a9e94"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C8",
+                    "pos": {
+                        "x": 142.0,
+                        "y": 102.8
+                    },
+                    "uuid": "d62eeed1-79c0-475b-9db5-39b9d834045c"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R12",
+                    "pos": {
+                        "x": 141.0,
+                        "y": 135.9
+                    },
+                    "uuid": "da18d72f-d1b5-4ba8-8e23-370d3a50dd48"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R45",
+                    "pos": {
+                        "x": 97.0,
+                        "y": 135.9
+                    },
+                    "uuid": "df393e4b-9b26-4afd-a377-45f0094a7810"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SOIC127P600X175-8N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint IC3",
+                    "pos": {
+                        "x": 124.365,
+                        "y": 84.1
+                    },
+                    "uuid": "e628fff6-80a6-47ed-ab0e-3925977b0887"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R15",
+                    "pos": {
+                        "x": 118.0,
+                        "y": 76.4
+                    },
+                    "uuid": "e86477a3-efba-49cb-b9fb-7a08d3eaa169"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R32",
+                    "pos": {
+                        "x": 161.6,
+                        "y": 113.6
+                    },
+                    "uuid": "e8754587-612f-4049-adbd-9c5371fbbc63"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C39",
+                    "pos": {
+                        "x": 96.0,
+                        "y": 84.4
+                    },
+                    "uuid": "e919e84d-7781-4c35-9210-924c7ec4eb31"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R11",
+                    "pos": {
+                        "x": 145.0,
+                        "y": 93.0
+                    },
+                    "uuid": "eaa30fac-44f8-48e1-9e0d-f03bf0f99174"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C10",
+                    "pos": {
+                        "x": 145.0,
+                        "y": 129.0
+                    },
+                    "uuid": "eb1637a1-b503-4ac6-8dc6-42896ccf5fed"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R5",
+                    "pos": {
+                        "x": 145.0,
+                        "y": 76.4
+                    },
+                    "uuid": "eb7eb4e8-7776-407c-b60d-6a6ce43af179"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C36",
+                    "pos": {
+                        "x": 101.0,
+                        "y": 123.7
+                    },
+                    "uuid": "ecd09680-5cf2-4350-8777-b9085bf57aef"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R42",
+                    "pos": {
+                        "x": 97.0,
+                        "y": 117.9
+                    },
+                    "uuid": "ed3bec5e-6e30-4fdf-8415-430e8581317d"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R37",
+                    "pos": {
+                        "x": 96.0,
+                        "y": 76.4
+                    },
+                    "uuid": "f12e5e8b-309a-4ae0-a86f-459de24ef66d"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C24",
+                    "pos": {
+                        "x": 167.0,
+                        "y": 78.9
+                    },
+                    "uuid": "f158b91e-6011-4932-8b6b-d38f8c0fc551"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C3",
+                    "pos": {
+                        "x": 182.46,
+                        "y": 103.66
+                    },
+                    "uuid": "f3688754-2453-4531-8697-d0a6bed0b864"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R9",
+                    "pos": {
+                        "x": 141.0,
+                        "y": 117.9
+                    },
+                    "uuid": "f53a583a-1ca1-47d0-800b-57082d95913d"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R24",
+                    "pos": {
+                        "x": 127.0,
+                        "y": 121.0
+                    },
+                    "uuid": "f58ffe04-f661-4e6f-b71b-c1365cb73e72"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CAPC3216X140N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint C11",
+                    "pos": {
+                        "x": 150.4,
+                        "y": 115.8
+                    },
+                    "uuid": "f8a20521-1aea-49a9-8c0f-07837604b964"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'RESC3216X65N' does not match copy in library 'multichannel_mixer'",
+            "items": [
+                {
+                    "description": "Footprint R19",
+                    "pos": {
+                        "x": 127.0,
+                        "y": 135.9
+                    },
+                    "uuid": "fb5a45a9-c146-4e09-970a-1a3be949a1e8"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Reference field of IC3",
+                    "pos": {
+                        "x": 120.359,
+                        "y": 84.1
+                    },
+                    "uuid": "28520b16-c5fa-4c24-bc71-6965d0761a5e"
+                },
+                {
+                    "description": "Pad 2 [+12V] of C21 on B.Cu",
+                    "pos": {
+                        "x": 119.5,
+                        "y": 84.4
+                    },
+                    "uuid": "88e58f92-c2a4-468b-acf1-7e0e78a26bc3"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Reference field of IC5",
+                    "pos": {
+                        "x": 98.359,
+                        "y": 84.1
+                    },
+                    "uuid": "8720a952-c5fc-4caa-b673-006377c6ab25"
+                },
+                {
+                    "description": "Pad 2 [+12V] of C39 on B.Cu",
+                    "pos": {
+                        "x": 97.5,
+                        "y": 84.4
+                    },
+                    "uuid": "c6d97c51-38e3-4b00-a640-106a38baad50"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Reference field of IC2",
+                    "pos": {
+                        "x": 142.359,
+                        "y": 84.1
+                    },
+                    "uuid": "7fa181e1-69d9-464a-ae81-9bced51542f0"
+                },
+                {
+                    "description": "Pad 2 [+12V] of C12 on B.Cu",
+                    "pos": {
+                        "x": 141.5,
+                        "y": 84.4
+                    },
+                    "uuid": "b350806d-e28e-4fb1-beba-6501898e83b7"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Reference field of IC4",
+                    "pos": {
+                        "x": 164.359,
+                        "y": 84.1
+                    },
+                    "uuid": "1e456e2e-f3a0-4432-8014-887b72a52c34"
+                },
+                {
+                    "description": "Pad 2 [+12V] of C30 on B.Cu",
+                    "pos": {
+                        "x": 163.5,
+                        "y": 84.4
+                    },
+                    "uuid": "0e483a8e-b18c-4eeb-8e8c-760f6b306309"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Non-Mirrored text on back layer",
+            "items": [
+                {
+                    "description": "Reference field of R3",
+                    "pos": {
+                        "x": 195.65,
+                        "y": 111.06
+                    },
+                    "uuid": "4cbe1a4d-c11a-4c56-b91c-c730a4af03f8"
+                }
+            ],
+            "severity": "warning",
+            "type": "nonmirrored_text_on_back_layer"
+        }
+    ]
+}

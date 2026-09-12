@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# KiCad artefacts our tools or KiCad itself create inside the fixture corpus
+tests/fixtures/**/fab/
+tests/fixtures/**/renders/
+tests/fixtures/**/_test-*
+tests/fixtures/**/*-bom.csv
+tests/fixtures/**/*.kicad_prl
+tests/fixtures/**/~*.lck
+tests/fixtures/**/.history/
+tests/fixtures/**/*-backups/
+
+# Claude Code worktrees and session files
+.claude/

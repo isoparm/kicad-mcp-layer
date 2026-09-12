@@ -1,0 +1,39 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-09-04T03:15:09",
+    "ignored_checks": [
+        {
+            "description": "SPICE model issue",
+            "key": "simulation_model_issue"
+        },
+        {
+            "description": "Assigned footprint doesn't match footprint filters",
+            "key": "footprint_filter"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning",
+        "exclusion"
+    ],
+    "kicad_version": "10.0.6",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/5b9623a5-6d01-41fc-9865-e1bc779418c8",
+            "violations": []
+        },
+        {
+            "path": "/ampli_ht_vertical/",
+            "uuid_path": "/5b9623a5-6d01-41fc-9865-e1bc779418c8/00000000-0000-0000-0000-00004b3a1333",
+            "violations": []
+        },
+        {
+            "path": "/ampli_ht_horizontal/",
+            "uuid_path": "/5b9623a5-6d01-41fc-9865-e1bc779418c8/00000000-0000-0000-0000-00004b3a13a4",
+            "violations": []
+        }
+    ],
+    "source": "complex_hierarchy.kicad_sch"
+}

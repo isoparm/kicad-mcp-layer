@@ -1,0 +1,597 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-09-04T03:15:14",
+    "ignored_checks": [
+        {
+            "description": "Global label only appears once in the schematic",
+            "key": "single_global_label"
+        },
+        {
+            "description": "Four connection points are joined together",
+            "key": "four_way_junction"
+        },
+        {
+            "description": "SPICE model issue",
+            "key": "simulation_model_issue"
+        },
+        {
+            "description": "Assigned footprint doesn't match footprint filters",
+            "key": "footprint_filter"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning"
+    ],
+    "kicad_version": "10.0.6",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8",
+            "violations": [
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR02 Hidden pin 1 [+12V, Power input, Line]",
+                            "pos": {
+                                "x": 0.8636,
+                                "y": 1.1557
+                            },
+                            "uuid": "27a0258d-ffa8-42f5-98f6-7a22e28c1621"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR03 Hidden pin 1 [GND, Power input, Line]",
+                            "pos": {
+                                "x": 0.8636,
+                                "y": 1.4605
+                            },
+                            "uuid": "a5e809d2-6892-41b0-a65f-6c529eb9d228"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR08 Hidden pin 1 [+1V1, Power input, Line]",
+                            "pos": {
+                                "x": 1.4351,
+                                "y": 0.8382
+                            },
+                            "uuid": "95425c25-9585-4377-b221-de5c9ce3465b"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol J6 Pin R [Passive, Line]",
+                            "pos": {
+                                "x": 1.9304,
+                                "y": 0.762
+                            },
+                            "uuid": "8554cdeb-6b13-4628-b2f8-991ff8ffb9db"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R1 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 0.8636,
+                                "y": 1.3081
+                            },
+                            "uuid": "7b6efc27-7552-4dfe-b337-b08fb5f64b34"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R2 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 0.8636,
+                                "y": 1.4351
+                            },
+                            "uuid": "ad4523e9-7e18-42a7-8ff9-7f68a6d07442"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors THD'",
+                    "items": [
+                        {
+                            "description": "Symbol C1 [CTEB_2.2UF_35V_10%_254-500X840]",
+                            "pos": {
+                                "x": 0.9779,
+                                "y": 1.3843
+                            },
+                            "uuid": "f987e89c-ed4c-4191-a15b-7fdce7e2e2cd"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'ICs And Semiconductors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol IC1 [TL072CD]",
+                            "pos": {
+                                "x": 1.1049,
+                                "y": 1.27
+                            },
+                            "uuid": "96ee1e48-6c38-49e0-bd38-db0e4616f7bb"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors THD'",
+                    "items": [
+                        {
+                            "description": "Symbol C2 [CTEB_2.2UF_35V_10%_254-500X840]",
+                            "pos": {
+                                "x": 1.4351,
+                                "y": 1.3843
+                            },
+                            "uuid": "29ef6bf1-cc9b-4478-affe-382f65a62c7c"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol C3 [CC1206_100NF_50V_10%_X7R]",
+                            "pos": {
+                                "x": 1.4478,
+                                "y": 0.508
+                            },
+                            "uuid": "379f7fd7-11be-48c8-8081-e23aa9633cd2"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'ICs And Semiconductors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol IC1 [TL072CD]",
+                            "pos": {
+                                "x": 1.4986,
+                                "y": 0.6858
+                            },
+                            "uuid": "bc4abb49-626d-494b-a9aa-ec713c163ae1"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R3 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.6256,
+                                "y": 0.6223
+                            },
+                            "uuid": "b6ad1337-3824-4e8a-8dec-58ba79a75eed"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors THD'",
+                    "items": [
+                        {
+                            "description": "Symbol C4 [CTEB_2.2UF_35V_10%_254-500X840]",
+                            "pos": {
+                                "x": 1.778,
+                                "y": 0.7366
+                            },
+                            "uuid": "fef6fbd9-9c5e-4479-8d68-cf394794f78b"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Miscellaneous THD'",
+                    "items": [
+                        {
+                            "description": "Symbol J5 [CLIFF_FC68148(DC-10A)]",
+                            "pos": {
+                                "x": 1.9431,
+                                "y": 0.3683
+                            },
+                            "uuid": "64b3ccda-14ab-4779-8d7d-dcb4a8685e04"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors THD'",
+                    "items": [
+                        {
+                            "description": "Symbol C32 [CTEB_2.2UF_35V_10%_254-500X840]",
+                            "pos": {
+                                "x": 1.0287,
+                                "y": 0.8128
+                            },
+                            "uuid": "bc4749c7-3dbe-4b06-b4ed-44cb7b70d768"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R37 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.1049,
+                                "y": 0.8128
+                            },
+                            "uuid": "f28ce32c-3d47-447b-bffd-6e1a94f0a674"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R38 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.2192,
+                                "y": 0.8128
+                            },
+                            "uuid": "4b243851-908a-4c50-a154-80e08308eca2"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol C33 [CC1206_100NF_50V_10%_X7R]",
+                            "pos": {
+                                "x": 1.2573,
+                                "y": 0.6858
+                            },
+                            "uuid": "7ea2438c-df3b-4510-8466-fa65d06ebb50"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'ICs And Semiconductors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol IC5 [TL072CD]",
+                            "pos": {
+                                "x": 1.27,
+                                "y": 0.8763
+                            },
+                            "uuid": "dbb100be-d780-4615-a444-8bcc3628c99d"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R39 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.5113,
+                                "y": 0.8128
+                            },
+                            "uuid": "2b207592-18a5-47ef-8fd3-f4ec2b99b2c8"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R40 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.524,
+                                "y": 0.5207
+                            },
+                            "uuid": "dbc7d674-eca6-4b2e-ac5e-602a6ec1f246"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R41 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.6129,
+                                "y": 1.0541
+                            },
+                            "uuid": "00e27837-31c8-486a-bbbd-ccd7845626c8"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol C34 [CC1206_100NF_50V_10%_X7R]",
+                            "pos": {
+                                "x": 1.6256,
+                                "y": 0.6985
+                            },
+                            "uuid": "85f7cc7f-4197-41fe-be96-17e64eca5e9e"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol C35 [CC1206_100NF_50V_10%_X7R]",
+                            "pos": {
+                                "x": 1.6383,
+                                "y": 0.4064
+                            },
+                            "uuid": "bbf27769-1dff-4ed3-abea-93bf5a583fcb"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R42 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.7526,
+                                "y": 0.8128
+                            },
+                            "uuid": "f3ec3f8a-c008-48d5-8177-34c06a065a9f"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol C36 [CC1206_100NF_50V_10%_X7R]",
+                            "pos": {
+                                "x": 1.7526,
+                                "y": 0.9017
+                            },
+                            "uuid": "983b4ca0-8a05-4102-b902-e5bd5a6dc597"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol C37 [CC1206_100NF_50V_10%_X7R]",
+                            "pos": {
+                                "x": 1.7526,
+                                "y": 0.9652
+                            },
+                            "uuid": "d66b3c05-c683-41b0-b98c-4a9f7f447fb9"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R43 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.7653,
+                                "y": 0.5207
+                            },
+                            "uuid": "f35dbce1-c68f-45c1-8aa2-f09a2c7d2732"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R44 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.7653,
+                                "y": 0.6096
+                            },
+                            "uuid": "48ec6310-064e-42b1-9b0d-c670e21a09dd"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R45 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.8542,
+                                "y": 1.0541
+                            },
+                            "uuid": "3cd497c2-b94b-4467-b80d-59cfd5613d24"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R46 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 1.9304,
+                                "y": 1.0668
+                            },
+                            "uuid": "48e10780-1734-4126-8e6c-bce4c392b08b"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol C38 [CC1206_100NF_50V_10%_X7R]",
+                            "pos": {
+                                "x": 1.9304,
+                                "y": 1.1811
+                            },
+                            "uuid": "56e9017a-ce7b-4d86-ac8b-77ef3ac83bc1"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol C39 [CC1206_100NF_50V_10%_X7R]",
+                            "pos": {
+                                "x": 2.0828,
+                                "y": 0.6731
+                            },
+                            "uuid": "47514719-5ff5-4930-9f01-46f30f26b897"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'ICs And Semiconductors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol IC5 [TL072CD]",
+                            "pos": {
+                                "x": 2.1336,
+                                "y": 0.7366
+                            },
+                            "uuid": "5857ce07-a51f-4553-b3df-2f5620627f8f"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Resistors SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol R47 [R1206_10K_1%_0.25W_100PPM]",
+                            "pos": {
+                                "x": 2.54,
+                                "y": 0.7874
+                            },
+                            "uuid": "1e82b006-4516-4607-b938-3d6141a537db"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'Capacitors THD'",
+                    "items": [
+                        {
+                            "description": "Symbol C40 [CTEB_2.2UF_35V_10%_254-500X840]",
+                            "pos": {
+                                "x": 2.6289,
+                                "y": 0.7874
+                            },
+                            "uuid": "2ac75c40-d5f7-4281-9f63-f2ae20d96b27"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                }
+            ]
+        },
+        {
+            "path": "/CH1/",
+            "uuid_path": "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/8b945230-5f99-4834-98ec-44a11b86c8e7",
+            "violations": []
+        },
+        {
+            "path": "/CH2/",
+            "uuid_path": "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/28f12a69-adb8-432e-b16f-23450e62f642",
+            "violations": []
+        },
+        {
+            "path": "/CH3/",
+            "uuid_path": "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/b924e033-d20d-4b7d-8c8a-6be6c11f2802",
+            "violations": []
+        },
+        {
+            "path": "/CH4/",
+            "uuid_path": "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/eaae7191-0144-4728-9382-3abf6e7a2d68",
+            "violations": []
+        }
+    ],
+    "source": "multichannel_mixer.kicad_sch"
+}
