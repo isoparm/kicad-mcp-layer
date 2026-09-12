@@ -225,6 +225,17 @@ could be reused. Short version:
 * Two tool tiers: `core` reads, checks, exports, renders, reviews and documents; `full` adds
   design edits and the frozen routers.
 
+## A word to visitors
+
+Everything here stands on KiCad. It is free, open source, and its development is funded by donations.
+The KiCad developers have said what they want for the next release, and every item would let this
+project grow: an API for the schematic editor, which KiCad 10 does not have, headless use of that API
+through kicad-cli, and footprints generated through the API instead of the footprint wizard. Each one
+would replace a workaround in this library with a direct call into KiCad.
+
+If this project is useful to you, please visit [kicad.org](https://www.kicad.org/) and
+[donate to KiCad](https://www.kicad.org/donate/). That is where the real work happens.
+
 ## Related
 
 * [kicad-ai-stack](https://github.com/ShamanAndrey/kicad-ai-stack): the workspace around this library, with
