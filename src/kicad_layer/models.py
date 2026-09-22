@@ -40,6 +40,36 @@ class Finding(BaseModel):
     items: list[FindingItem] = Field(default_factory=list)
 
 
+class WorstFinding(BaseModel):
+    id: str
+    type: str
+    severity: str
+    rule: str | None = Field(default=None, description="'rule:<name>', 'netclass:<name>' or 'board' when the description names the constraint.")
+    description: str
+    required_mm: float | None = None
+    actual_mm: float | None = None
+    deficit_mm: float | None = Field(default=None, description="How far the actual value misses the constraint; the sort key.")
+    items: list[str] = Field(default_factory=list, description="Item descriptions, e.g. 'Pad 1 [GND] of U3 on F.Cu'.")
+    x_mm: float | None = None
+    y_mm: float | None = None
+
+
+class UnconnectedPair(BaseModel):
+    a: str
+    b: str | None = None
+    x_mm: float | None = None
+    y_mm: float | None = None
+
+
+class FindingsSummary(BaseModel):
+    by_type: dict[str, int] = Field(default_factory=dict, description="Active findings per KiCad rule key.")
+    by_rule: dict[str, int] = Field(default_factory=dict, description="Active findings per constraint named in the description: rule:<name>, netclass:<name>, board.")
+    by_severity: dict[str, int] = Field(default_factory=dict)
+    worst: list[WorstFinding] = Field(default_factory=list, description="The worst violations: largest deficit first, then the report order.")
+    unconnected: int = 0
+    unconnected_pairs: list[UnconnectedPair] = Field(default_factory=list)
+
+
 class VerdictReport(BaseModel):
     verdict: Verdict
     kind: Literal["erc", "drc"]
@@ -53,10 +83,12 @@ class VerdictReport(BaseModel):
     )
     findings: list[Finding] = Field(default_factory=list)
     truncated: bool = False
+    summary: FindingsSummary | None = Field(default=None, description="Present with summary=true; findings is then empty and the full list is in report_path.")
     command: list[str] = Field(default_factory=list)
     exit_code: int | None = None
     duration_s: float | None = None
     notes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list, description="Conditions that make the result less trustworthy, e.g. default design rules.")
 
 
 class ExportResult(BaseModel):
@@ -550,6 +582,25 @@ class AnnotateResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class FootprintMove(BaseModel):
+    """One move of a pcb_move_footprints batch; omitted fields keep their value."""
+
+    ref: str
+    x: float | None = Field(default=None, description="New X in mm (give x and y together).")
+    y: float | None = None
+    rotation: float | None = Field(default=None, description="Absolute rotation in degrees.")
+    side: Literal["F.Cu", "B.Cu"] | None = Field(default=None, description="Flip to this side (live channel only).")
+
+
+class MountingHole(BaseModel):
+    x: float
+    y: float
+    drill: float = Field(gt=0, description="Hole diameter in mm.")
+    pad: float = Field(default=0.0, ge=0, description="Copper pad diameter in mm; 0 or not above the drill gives a bare NPTH.")
+    net: str | None = Field(default=None, description="Net of a plated hole, e.g. GND.")
+    ref: str | None = Field(default=None, description="Reference; default the next free H<n>.")
+
+
 class BoardEditResult(BaseModel):
     changed: bool
     dry_run: bool
@@ -769,6 +820,13 @@ class StitchReport(BaseModel):
     skipped: list[str] = Field(default_factory=list, description="Pads with no clear spot for a via, with the reason; left to the autorouter.")
     segments: int
     vias: int
+    rejected: list[str] = Field(default_factory=list, description="Pads (also in skipped) refused because no clear via spot lands on their plane: a cut-out, another net's zone, or no plane at all.")
+    warnings: list[str] = Field(default_factory=list, description="E.g. unfilled zones (checked against outlines) or default design rules.")
+
+
+class ExcludedNet(BaseModel):
+    net: str
+    reason: str
 
 
 class AutorouteReport(BaseModel):
@@ -785,6 +843,12 @@ class AutorouteReport(BaseModel):
     vias: int
     nets: int
     log_tail: str = ""
+    warnings: list[str] = Field(default_factory=list, description="Conditions that make the result less trustworthy, e.g. default design rules.")
+    excluded_nets: list[ExcludedNet] = Field(default_factory=list, description="Nets left unrouted on purpose, with the reason; their copper went to the router protected.")
+    ignored_classes: list[str] = Field(default_factory=list, description="DSN classes passed to FreeRouting's ignore list (-inc).")
+    class_clearances: list[str] = Field(default_factory=list, description="class_class clearance rules taken from the .kicad_dru.")
+    keepouts: list[str] = Field(default_factory=list, description="Keep-out entries emitted from rule areas and area rules.")
+    dropped_segments: int = Field(0, description="Segments of excluded nets the router drew anyway (it ignored -inc) and that were dropped.")
 
 
 class PartHit(BaseModel):
@@ -823,3 +887,26 @@ class LibFetch(BaseModel):
     files: list[str]  # written or updated, relative to library_dir
     warnings: list[str]
     source: str
+
+
+JobState = Literal["queued", "running", "done", "failed", "lost", "unknown"]
+
+
+class JobStatus(BaseModel):
+    id: str
+    tool: str | None = None
+    state: JobState = Field(description="done: job_result has the result. lost: the server restarted while it ran. unknown: no such job.")
+    elapsed_s: float | None = None
+    progress: dict[str, Any] = Field(default_factory=dict, description="FreeRouting: pass, phase, unrouted, violations from its log.")
+    log_tail: list[str] = Field(default_factory=list, description="The last lines of the job's output.")
+    error: str | None = None
+    hint: str | None = None
+
+
+class JobResult(BaseModel):
+    id: str
+    tool: str | None = None
+    state: JobState
+    elapsed_s: float | None = None
+    result: Any = Field(default=None, description="The tool's normal result once done: its structured output, or {'text': [...]} for a tool without one.")
+    hint: str | None = None

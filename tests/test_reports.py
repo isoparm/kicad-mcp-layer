@@ -71,3 +71,60 @@ def test_unconnected_items_count_as_errors():
     verdict, counts = summarize(findings)
     assert verdict == "FAIL"
     assert counts["unconnected"] == 1
+
+
+def test_summary_counts_types_rules_and_ranks_by_deficit():
+    from kicad_layer.cli.reports import summarize_findings
+
+    data = load("drc-multichannel.json")
+    data["violations"].append({"type": "clearance", "severity": "error", "excluded": False,
+                               "description": "Clearance violation (rule 'HV_creepage' clearance 2.5000 mm; actual 1.1000 mm)",
+                               "items": [{"uuid": "u1", "description": "Pad 1 [HV] of J1 on F.Cu", "pos": {"x": 10.0, "y": 20.0}}]})
+    data["unconnected_items"] = [{"type": "unconnected_items", "severity": "error", "description": "Missing connection between items",
+                                  "items": [{"uuid": f"a{i}", "description": f"Pad {i} [GND] of U1", "pos": {"x": 1.0, "y": 2.0}},
+                                            {"uuid": f"b{i}", "description": f"Pad {i} [GND] of U2", "pos": {"x": 3.0, "y": 4.0}}]} for i in range(30)]
+    findings, _ = parse_drc(data)
+    s = summarize_findings(findings, top=5)
+    assert s.by_type["lib_footprint_mismatch"] == 81 and s.by_type["clearance"] == 13
+    assert s.by_rule["rule:HV_creepage"] == 1 and s.by_rule["board"] == 16
+    assert s.worst[0].rule == "rule:HV_creepage" and s.worst[0].deficit_mm == 1.4
+    assert s.worst[0].required_mm == 2.5 and s.worst[0].actual_mm == 1.1 and s.worst[0].x_mm == 10.0
+    assert len(s.worst) == 5 and all(w.deficit_mm is not None for w in s.worst)
+    assert s.unconnected == 30 and len(s.unconnected_pairs) == 5
+    assert s.unconnected_pairs[0].a.startswith("Pad 0") and s.unconnected_pairs[0].b.endswith("U2")
+
+
+def test_measure_reads_minimum_and_maximum_constraints():
+    from kicad_layer.cli.reports import measure, rule_of
+
+    assert measure("Track width (netclass 'PWR' min width 0.5000 mm; actual 0.2500 mm)") == (0.5, 0.25, 0.25)
+    assert measure("Track width (rule 'short' max width 1.0000 mm; actual 1.2000 mm)") == (1.0, 1.2, 0.2)
+    assert measure("Silkscreen clipped by solder mask") == (None, None, None)
+    assert rule_of("Clearance violation (netclass 'Default' clearance 0.2 mm; actual 0.1 mm)") == "netclass:Default"
+    assert rule_of("Silkscreen clipped by solder mask") is None
+
+
+def test_build_summary_mode_drops_the_list_and_keeps_the_report_path(tmp_path):
+    from kicad_layer.cli import reports, runner
+
+    report = tmp_path / "drc.json"
+    report.write_text((DATA / "drc-multichannel.json").read_text(encoding="utf-8"), encoding="utf-8")
+    res = runner.CliResult(command=["kicad-cli"], returncode=runner.EXIT_VIOLATIONS, stdout="", stderr="", duration_s=1.0)
+    full = reports._build("drc", tmp_path / "b.kicad_pcb", res, report, parse_drc)
+    assert len(full.findings) == 103 and not full.truncated and full.summary is None
+    short = reports._build("drc", tmp_path / "b.kicad_pcb", res, report, parse_drc, summary=True, top=3)
+    assert short.findings == [] and short.truncated and short.report_path == str(report)
+    assert short.counts == full.counts and len(short.summary.worst) == 3
+    assert len(short.model_dump_json()) < len(full.model_dump_json()) / 10
+
+
+def test_full_list_is_capped(tmp_path, monkeypatch):
+    from kicad_layer.cli import reports, runner
+
+    monkeypatch.setattr(reports, "MAX_FINDINGS", 50)
+    report = tmp_path / "drc.json"
+    report.write_text((DATA / "drc-multichannel.json").read_text(encoding="utf-8"), encoding="utf-8")
+    res = runner.CliResult(command=["kicad-cli"], returncode=runner.EXIT_VIOLATIONS, stdout="", stderr="", duration_s=1.0)
+    out = reports._build("drc", tmp_path / "b.kicad_pcb", res, report, parse_drc)
+    assert len(out.findings) == 50 and out.truncated and out.counts["total"] == 103
+    assert any("summary=true" in n for n in out.notes)

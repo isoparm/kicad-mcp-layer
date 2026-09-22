@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from kicad_layer import jobs
 from kicad_layer.errors import KICAD_CLI_TIMEOUT, LayerError
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ def run(command: Sequence[str | Path], *, timeout_s: float, cwd: Path | None = N
     """Run ``command`` and return its result. Raises LayerError on timeout only."""
     argv = [str(c) for c in command]
     log.info("run: %s", " ".join(argv))
+    jobs.note("run: " + " ".join(argv))
     started = time.monotonic()
     try:
         proc = subprocess.run(
@@ -72,4 +74,5 @@ def run(command: Sequence[str | Path], *, timeout_s: float, cwd: Path | None = N
         duration_s=round(time.monotonic() - started, 3),
     )
     log.info("exit %s in %.2fs", result.returncode, result.duration_s)
+    jobs.note(f"exit {result.returncode} in {result.duration_s:.1f} s")
     return result

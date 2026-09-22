@@ -89,6 +89,11 @@ class ZoneGeo:
     fill_requested: bool
     filled: bool
     polygon: list[tuple[float, float]] = field(default_factory=list)  # the zone's own outline, not the fill
+    outlines: list[list[tuple[float, float]]] = field(default_factory=list)  # every outline ring (a cut-out is a ring of its own)
+    fills: dict[str, list[list[tuple[float, float]]]] = field(default_factory=dict)  # layer -> filled polygons, empty when unfilled
+    priority: int = 0
+    rule_area: bool = False  # a keep-out: no copper of its own
+    keepout: dict[str, bool] = field(default_factory=dict)  # tracks, vias, pads, copperpour, footprints -> not allowed
 
 
 @dataclass
@@ -279,8 +284,17 @@ def load_board(path: Path) -> BoardModel:
         fill = child(z, "fill")
         poly = child(z, "polygon")
         pts = [(float(xy[1]), float(xy[2])) for xy in children(child(poly, "pts"), "xy")] if poly is not None and child(poly, "pts") is not None else []
+        rings = [[(float(xy[1]), float(xy[2])) for xy in children(child(pg, "pts"), "xy")] for pg in children(z, "polygon") if child(pg, "pts") is not None]
+        fills: dict[str, list[list[tuple[float, float]]]] = {}
+        for fp_ in children(z, "filled_polygon"):
+            if child(fp_, "pts") is not None:
+                fills.setdefault(value(fp_, "layer") or (zl[0] if zl else ""), []).append([(float(xy[1]), float(xy[2])) for xy in children(child(fp_, "pts"), "xy")])
+        ko = child(z, "keepout")
+        keepout = {str(c[0]): str(c[1]) == "not_allowed" for c in (ko or [])[1:] if isinstance(c, list) and len(c) > 1}
+        prio = child(z, "priority")
         zones.append(ZoneGeo(net=value(z, "net"), layers=zl, name=value(z, "name") or "", fill_requested=fill is not None and atoms(fill)[:1] == ["yes"],
-                             filled=bool(children(z, "filled_polygon")), polygon=pts))
+                             filled=bool(children(z, "filled_polygon")), polygon=pts, outlines=rings, fills=fills,
+                             priority=int(float(prio[1])) if prio is not None and len(prio) > 1 else 0, rule_area=ko is not None, keepout=keepout))
     for g in children(root, "gr_text"):
         if (value(g, "layer") or "").endswith("SilkS"):
             eff = child(g, "effects")

@@ -8,6 +8,14 @@ as ``protect`` wiring so the router keeps them, copper zones on plane layers as 
 outline holes as keepouts, net classes with width, clearance and via, and the default class called
 ``kicad_default``.
 
+What the DSN cannot say is handled before the router sees the board (``build_dsn``): rule areas
+(keep-out zones, on the board or inside a footprint) become per-layer ``keepout``, ``via_keepout``
+and ``place_keepout`` entries; plain two-class clearance rules of the .kicad_dru become
+``class_class`` rules; nets named by rules the router cannot honour (creepage, physical clearance,
+disallow, area or footprint conditions), nets whose class width makes them pours, and nets or
+classes the caller excludes go into ``<class>_excluded`` classes with their copper protected, and
+the caller passes those classes to FreeRouting's ignore list. The result says which and why.
+
 Only what FreeRouting needs is emitted. Pad shapes: circle, rect, oval (a path with an aperture),
 roundrect and custom approximated as the enclosing rectangle for routing purposes (the router only
 needs the copper's extent). Through-hole pads span every copper layer; plated holes without copper
@@ -16,6 +24,7 @@ become round keepouts.
 
 from __future__ import annotations
 
+import fnmatch
 import math
 import re
 from dataclasses import dataclass, field
@@ -25,6 +34,7 @@ from ..kicad_libs import rotate_about
 from ..review import BoardModel, PadGeo, load_board
 from ..routing import load_netclasses, netclass_for
 from ..sexpr import child, children, parse, tag, value
+from . import dru as dru_mod
 
 UM = 1000.0  # micrometres per millimetre
 
@@ -215,9 +225,84 @@ class DsnOptions:
     ignore_nets: tuple[str, ...] = ()  # nets left out of the network (e.g. planes the router must not route)
     keepout_npth_margin: float = 0.3
     min_hole_to_hole: float = 0.45  # KiCad's board setup default; sets the via-to-via clearance rule
+    exclude_nets: tuple[str, ...] = ()  # net names or wildcard patterns: protected, in the network, never routed
+    exclude_classes: tuple[str, ...] = ()  # net classes excluded the same way
+    auto_exclude_ruled_nets: bool = False  # also exclude nets the .kicad_dru rules or their pour width make unroutable
+    force_nets: tuple[str, ...] = ()  # nets never auto-excluded, whatever the rules say
+    pour_width_mm: float = 2.0  # a net wider than this with a zone on it is a pour, not a track
+    rules_path: Path | None = None  # the .kicad_dru; default: next to the project or the board
+
+
+@dataclass
+class DsnExport:
+    """The DSN text and what the export decided on the router's behalf."""
+
+    text: str
+    excluded: dict[str, str] = field(default_factory=dict)  # net -> why it is not routed
+    ignore_classes: list[str] = field(default_factory=list)  # pass these to FreeRouting's -inc
+    class_rules: list[str] = field(default_factory=list)  # class_class rules emitted, readable
+    keepouts: list[str] = field(default_factory=list)  # keep-out entries emitted, readable
+    warnings: list[str] = field(default_factory=list)
+
+
+def _dsn_class(cls: str) -> str:
+    return "kicad_default" if cls == "Default" else cls
+
+
+EXCLUDED_SUFFIX = "_excluded"
+
+
+def _expand_layers(names: list[str], copper: list[str]) -> list[str]:
+    out: list[str] = []
+    for n in names:
+        if n in ("*.Cu", "*.*"):
+            out += copper
+        elif n == "F&B.Cu":
+            out += [copper[0], copper[-1]]
+        elif n in copper:
+            out.append(n)
+    return list(dict.fromkeys(out))
+
+
+def _zone_layers(z) -> list[str]:
+    return [str(a) for ln in children(z, "layers") + children(z, "layer") for a in ln[1:]]
+
+
+def _zone_outline(z) -> list[tuple[float, float]]:
+    poly = child(z, "polygon")
+    pts = child(poly, "pts") if poly is not None else None
+    return [(float(xy[1]), float(xy[2])) for xy in children(pts, "xy")] if pts is not None else []
+
+
+def _all_zones(root) -> list:
+    """Every zone node: the board's and those inside footprints (stored in board coordinates)."""
+    out = list(children(root, "zone"))
+    for fp in children(root, "footprint"):
+        out += children(fp, "zone")
+    return out
+
+
+def _poly(layer: str, pts: list[tuple[float, float]]) -> str:
+    return f"(polygon {layer} 0 " + " ".join(_pt(x, y) for x, y in pts) + ")"
+
+
+def _rule_layers(rule_layer: str | None, layers: list[str], copper: list[str]) -> list[str]:
+    if not rule_layer:
+        return layers
+    if rule_layer == "outer":
+        keep = {copper[0], copper[-1]}
+    elif rule_layer == "inner":
+        keep = set(copper[1:-1])
+    else:
+        keep = {rule_layer}
+    return [l for l in layers if l in keep]
 
 
 def export_dsn(board: Path, project: Path | None = None, *, options: DsnOptions | None = None) -> str:
+    return build_dsn(board, project, options=options).text
+
+
+def build_dsn(board: Path, project: Path | None = None, *, options: DsnOptions | None = None) -> DsnExport:
     opt = options or DsnOptions()
     bm = load_board(board)
     if project is None:
@@ -232,6 +317,75 @@ def export_dsn(board: Path, project: Path | None = None, *, options: DsnOptions 
                 if l in copper[1:-1] and z.net:
                     planes[l] = z.net
     routable = opt.routable_layers or [l for l in copper if l not in planes]
+    report = DsnExport(text="")
+    root = parse(board.read_text(encoding="utf-8", errors="replace"))
+    zones = _all_zones(root)
+
+    # ---- nets, classes, and what the router must leave alone
+    nets: dict[str, list[str]] = {}
+    for f in bm.footprints:
+        for p in f.pads:
+            if p.net and p.kind != "np_thru_hole" and p.number:
+                nets.setdefault(p.net, []).append(f"{f.ref}-{p.number}")
+    class_of = {n: netclass_for(n, classes, assignments)[0] for n in nets}
+    rules = dru_mod.load_rules(opt.rules_path or dru_mod.dru_for(board, project))
+    excluded = report.excluded
+    for pat in opt.exclude_nets:
+        hits = [n for n in nets if fnmatch.fnmatchcase(n, pat)]
+        if not hits:
+            report.warnings.append(f"exclude_nets: no net on the board matches {pat!r}.")
+        for n in hits:
+            excluded.setdefault(n, "excluded by the caller")
+    for cls in opt.exclude_classes:
+        want = "Default" if cls == "kicad_default" else cls
+        hits = [n for n in nets if class_of[n] == want]
+        if not hits:
+            report.warnings.append(f"exclude_classes: no net on the board is in class {cls!r}.")
+        for n in hits:
+            excluded.setdefault(n, f"class {cls} excluded by the caller")
+    candidates: dict[str, list[str]] = {}
+    net_names = list(nets)
+    width_rule: dict[str, float] = {}
+    for rule in rules:
+        named = dru_mod.nets_of_rule(rule, net_names, class_of)
+        unexp = sorted(rule.kinds() & set(dru_mod.UNEXPRESSIBLE))
+        areas = rule.area_functions()
+        for c in rule.constraints:
+            if c.kind == "track_width" and (c.min or c.opt) and named:
+                for n in named:
+                    width_rule[n] = max(width_rule.get(n, 0.0), c.min or c.opt or 0.0)
+        if not unexp and not areas:
+            continue
+        what = ", ".join(unexp + [f"{fn}('{arg}')" for fn, arg in areas])
+        if named:
+            for n in named:
+                candidates.setdefault(n, []).append(f"rule '{rule.name}' ({what}) is not expressible in the DSN")
+        elif not ("disallow" in unexp and areas):  # an area-only disallow becomes a keep-out below
+            report.warnings.append(f"Rule '{rule.name}' ({what}) names no net or class; FreeRouting cannot honour it, check the result with run_drc.")
+    zone_nets = {value(z, "net") for z in zones if child(z, "keepout") is None and value(z, "net")}
+    for n in nets:
+        w = max(float(classes.get(class_of[n], {}).get("track_width") or 0.0), width_rule.get(n, 0.0))
+        if w > opt.pour_width_mm:
+            if n in zone_nets:
+                candidates.setdefault(n, []).append(f"track width {w:g} mm > {opt.pour_width_mm:g} mm and a zone on the net: a pour, not a track")
+            else:
+                report.warnings.append(f"{n}: track width {w:g} mm and no zone on the net; FreeRouting will draw {w:g} mm tracks.")
+    for n, why in sorted(candidates.items()):
+        if n in excluded:
+            continue
+        if n in opt.force_nets:
+            report.warnings.append(f"{n} is routed on request although " + "; ".join(why) + ".")
+        elif opt.auto_exclude_ruled_nets:
+            excluded[n] = "; ".join(why)
+        else:
+            report.warnings.append(f"{n} should not be autorouted: " + "; ".join(why) + ".")
+    auto = sorted(n for n in excluded if n in candidates)
+    if auto:
+        report.warnings.append("Not routed because of the design rules (route by hand or pass force_nets): " + ", ".join(auto) + ".")
+
+    def class_key(n: str) -> str:
+        base = _dsn_class(class_of[n])
+        return base + EXCLUDED_SUFFIX if n in excluded else base
 
     out: list[str] = []
     w = out.append
@@ -267,6 +421,73 @@ def export_dsn(board: Path, project: Path | None = None, *, options: DsnOptions 
             if layer in z.layers and z.net == net and z.polygon:
                 w(f"    (plane {_q(net)} (polygon {layer} 0 " + " ".join(_pt(x, y) for x, y in z.polygon) + "))")
                 break
+    # rule areas: keep-out zones on the board and inside footprints, per copper layer
+    by_name: dict[str, tuple[list[str], list[tuple[float, float]]]] = {}
+    for z in zones:
+        pts = _zone_outline(z)
+        layers = _expand_layers(_zone_layers(z), copper)
+        zname = value(z, "name") or ""
+        if zname and pts:
+            by_name.setdefault(zname, (layers, pts))
+        ko = child(z, "keepout")
+        if ko is None or len(pts) < 3:
+            continue
+        flags = {str(c[0]): str(c[1]) for c in ko[1:] if isinstance(c, list) and len(c) > 1}
+        label = zname or "rule area"
+        if flags.get("tracks") == "not_allowed":
+            for l in layers:
+                w(f"    (keepout {_q(label)} {_poly(l, pts)})")
+            report.keepouts.append(f"keepout '{label}' on {', '.join(layers)}" + (" (vias too)" if flags.get("vias") == "allowed" else ""))
+        elif flags.get("vias") == "not_allowed":
+            for l in layers:
+                w(f"    (via_keepout {_q(label)} {_poly(l, pts)})")
+            report.keepouts.append(f"via_keepout '{label}' on {', '.join(layers)}")
+        if flags.get("footprints") == "not_allowed" and layers:
+            w(f"    (place_keepout {_q(label)} {_poly(layers[0], pts)})")
+            report.keepouts.append(f"place_keepout '{label}'")
+    # .kicad_dru rules that disallow vias or tracks inside a named area, for every net
+    for rule in rules:
+        dis = [c for c in rule.constraints if c.kind == "disallow"]
+        areas = [(fn, arg) for fn, arg in rule.area_functions() if fn in ("insideArea", "enclosedByArea", "intersectsArea")]
+        if not dis or not areas or rule.named_classes() or rule.named_nets():
+            continue
+        items = {a for c in dis for a in c.args}
+        for _, arg in areas:
+            if arg not in by_name:
+                report.warnings.append(f"Rule '{rule.name}' refers to area {arg!r}, which is not on the board.")
+                continue
+            layers, pts = by_name[arg]
+            layers = _rule_layers(rule.layer, layers, copper)
+            if any(a in items for a in ("track", "tracks")):
+                kind = "keepout"
+            elif any("via" in a for a in items):
+                kind = "via_keepout"
+            else:
+                report.warnings.append(f"Rule '{rule.name}' disallows {', '.join(sorted(items))} in {arg!r}; the DSN has no keep-out for that.")
+                continue
+            for l in layers:
+                w(f"    ({kind} {_q(arg)} {_poly(l, pts)})")
+            report.keepouts.append(f"{kind} '{arg}' on {', '.join(layers)} from rule '{rule.name}'")
+    # the copper of excluded nets' pours: their fill is an obstacle, their outline only a plane when unfilled
+    for z in children(root, "zone"):
+        n = value(z, "net")
+        if n not in excluded or child(z, "keepout") is not None:
+            continue
+        fills = children(z, "filled_polygon")
+        done = False
+        for fp in fills:
+            l = value(fp, "layer")
+            pts = [(float(xy[1]), float(xy[2])) for xy in children(child(fp, "pts"), "xy")] if child(fp, "pts") is not None else []
+            if l in routable and len(pts) >= 3:
+                w(f"    (keepout {_q('pour ' + n)} {_poly(l, pts)})")
+                done = True
+        if done:
+            report.keepouts.append(f"keepout for the filled pour of {n}")
+        elif fills == [] and _zone_outline(z):
+            for l in _expand_layers(_zone_layers(z), copper):
+                if l in routable:
+                    w(f"    (plane {_q(n)} {_poly(l, _zone_outline(z))})")
+            report.warnings.append(f"The zone of {n} is unfilled, so only its outline goes to the router as a plane; refill (pcb_refill_zones) before autoroute to protect its copper.")
     via_names: dict[tuple[float, float], str] = {}
 
     def via_name(size: float, drill: float) -> str:
@@ -326,11 +547,6 @@ def export_dsn(board: Path, project: Path | None = None, *, options: DsnOptions 
         w("    )")
     w("  )")
     # ---- network
-    nets: dict[str, list[str]] = {}
-    for f in bm.footprints:
-        for p in f.pads:
-            if p.net and p.kind != "np_thru_hole" and p.number:
-                nets.setdefault(p.net, []).append(f"{f.ref}-{p.number}")
     w("  (network")
     for net, pins in nets.items():
         if net in opt.ignore_nets:
@@ -342,17 +558,44 @@ def export_dsn(board: Path, project: Path | None = None, *, options: DsnOptions 
     for net in nets:
         if net in opt.ignore_nets:
             continue
-        cls, _ = netclass_for(net, classes, assignments)
-        by_class.setdefault(cls, []).append(net)
-    for cls, members in by_class.items():
+        by_class.setdefault(class_key(net), []).append(net)
+    for key, members in by_class.items():
+        cls = key[: -len(EXCLUDED_SUFFIX)] if key.endswith(EXCLUDED_SUFFIX) and members[0] in excluded else key
+        cls = "Default" if cls == "kicad_default" else cls
         c = classes.get(cls, default)
         cw = float(c.get("track_width", dw / UM)) * UM
         cc = float(c.get("clearance", dc / UM)) * UM
         v = via_name(float(c["via_diameter"]), float(c["via_drill"])) if c.get("via_diameter") and c.get("via_drill") else default_via
-        w(f"    (class {_q('kicad_default' if cls == 'Default' else cls)} " + " ".join(_q(n) for n in members))
+        w(f"    (class {_q(key)} " + " ".join(_q(n) for n in members))
         w(f"      (circuit (use_via {_q(v)}))")
         w(f"      (rule (width {_num(cw)}) (clearance {_num(cc)}))")
         w("    )")
+        if key.endswith(EXCLUDED_SUFFIX) and members[0] in excluded:
+            report.ignore_classes.append(key)
+    # plain two-class clearance rules of the .kicad_dru; creepage and physical clearance as a straight clearance
+    present = sorted({class_of[n] for n in nets if n not in opt.ignore_nets})
+    variants = {cls: [k for k in by_class if k in (_dsn_class(cls), _dsn_class(cls) + EXCLUDED_SUFFIX)] for cls in present}
+    pair_min: dict[tuple[str, str], tuple[float, str]] = {}
+    for rule in rules:
+        for con in rule.constraints:
+            if con.kind not in dru_mod.CLEARANCE_KINDS or not con.min:
+                continue
+            pairs, why = dru_mod.class_pairs(rule, present)
+            if not pairs:
+                if rule.condition and (rule.named_classes() or rule.named_nets() or "NetClass" in rule.condition):
+                    report.warnings.append(f"Rule '{rule.name}' ({con.kind} {con.min:g} mm) is not a plain two-class rule ({why}); the router does not see it.")
+                continue
+            for x, y in pairs:
+                k = tuple(sorted((x, y)))
+                if con.min > pair_min.get(k, (0.0, ""))[0]:
+                    pair_min[k] = (con.min, f"{rule.name}" + ("" if con.kind == "clearance" else f", {con.kind} as clearance"))
+    for (x, y), (mm_, src) in sorted(pair_min.items()):
+        for a in variants.get(x, []):
+            for b in variants.get(y, []):
+                if x == y and b < a:
+                    continue
+                w(f"    (class_class (classes {_q(a)} {_q(b)}) (rule (clearance {_num(mm_ * UM)})))")
+        report.class_rules.append(f"{_dsn_class(x)} / {_dsn_class(y)}: {mm_:g} mm ({src})")
     w("  )")
     # ---- existing copper
     w("  (wiring")
@@ -365,11 +608,18 @@ def export_dsn(board: Path, project: Path | None = None, *, options: DsnOptions 
                 w(f"    (via {_q(via_name(v.size, v.drill))} {_pt(v.x, v.y)} (net {_q(v.net)}) (type protect))")
     w("  )")
     w(")")
-    return "\n".join(out) + "\n"
+    report.text = "\n".join(out) + "\n"
+    return report
 
 
 def write_dsn(board: Path, dest: Path, project: Path | None = None, *, options: DsnOptions | None = None) -> Path:
+    write_dsn_export(board, dest, project, options=options)
+    return dest
+
+
+def write_dsn_export(board: Path, dest: Path, project: Path | None = None, *, options: DsnOptions | None = None) -> DsnExport:
+    exp = build_dsn(board, project, options=options)
     # LF only: FreeRouting's scanner reports every carriage return as a stray character and misparses the file
     with open(dest, "w", encoding="utf-8", newline=chr(10)) as f:
-        f.write(export_dsn(board, project, options=options))
-    return dest
+        f.write(exp.text)
+    return exp

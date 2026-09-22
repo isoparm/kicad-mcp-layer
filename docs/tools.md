@@ -13,8 +13,8 @@ adds the schematic and board edit tools and the frozen routers.
 | `kicad_doctor` | core | cli, ipc | read-only | Which process answers, which kicad-cli was found, whether KiCad's API is reachable and what is open, and what to do about problems |
 | `capabilities` | core | builtin | read-only | The capability matrix: covered, planned, gap, gui_only |
 | `project_open` | core | file | read-only | Locate a project; root schematic, board, sheets, variables, netclasses, format versions, lock files |
-| `run_erc` | core | cli | read-only | Electrical rules check of the whole hierarchy with a verdict and UUID-keyed findings |
-| `run_drc` | core | cli | read-only | Design rules check counting violations, unconnected items and schematic parity |
+| `run_erc` | core | cli | read-only | Electrical rules check of the whole hierarchy with a verdict and UUID-keyed findings; `summary` for counts and the worst ones |
+| `run_drc` | core | cli | read-only | Design rules check counting violations, unconnected items and schematic parity; `summary` for counts per type and rule, the worst violations and the unconnected pairs |
 | `sch_netlist` | core | cli | read-only | Resolved nets, nodes, components and sheets from the root sheet, cached by content |
 | `sch_trace` | core | cli | read-only | Each pin of one component: its net and everything else on it |
 | `export_bom` | core | cli | artifacts | Bill of materials CSV plus parsed rows |
@@ -43,9 +43,12 @@ adds the schematic and board edit tools and the frozen routers.
 | `pcb_add_track` | full | ipc or file | design write | Track segments through points on one layer |
 | `pcb_add_via` | full | ipc or file | design write | A through via on a net |
 | `pcb_add_zone` | full | ipc or file | design write | A copper pour on a net |
-| `pcb_refill_zones` | full | ipc or file | design write | Refill zones live, or with kicad-cli on a closed board |
+| `pcb_refill_zones` | full | ipc or file | design write | Refill zones live, or with kicad-cli on a closed board; refuses without the board's own `.kicad_pro` unless `allow_default_rules` |
 | `pcb_delete_items` | full | ipc or file | design write | Delete items by id, with their kinds checked first |
 | `pcb_save` | full | ipc | design write | Ask KiCad to save the open board |
+| `pcb_move_footprints` | full | ipc or file | design write | Move, rotate or flip several footprints in one write or one undo step |
+| `pcb_set_outline` | full | file | design write | The board outline on Edge.Cuts from a rectangle or polygon, corners rounded with tangent arcs |
+| `pcb_add_mounting_holes` | full | file | design write | Mounting holes as board-only footprints, plated on a net or bare NPTH |
 | `review_board` | core | cli | read-only | DRC, unrouted, zone fills, off-board parts, fab limits, power track widths, stitching, decoupling |
 | `review_schematic` | core | cli | read-only | ERC, footprints, values, annotation, power sources, decoupling, BOM summary, SPICE status |
 | `review_project` | core | cli | read-only | Both reviews in one report with one verdict |
@@ -61,8 +64,11 @@ adds the schematic and board edit tools and the frozen routers.
 | `stackup_info` | core | builtin | read-only | A stack-up preset: layers, permittivity, published impedance geometries |
 | `parts_search` | core | builtin | read-only | JLCPCB assembly catalogue: LCSC code, stock, basic part flag, price |
 | `route_pairs` | full | file | writes artifacts | Route the differential pairs as coupled pairs (escapes, heading-aware search, crossovers, tuning) into a routes JSON |
-| `stitch_planes` | full | file | writes artifacts | A stub and via from every surface-mount pad on a plane net to its plane, into the routes JSON |
+| `stitch_planes` | full | file | writes artifacts | A stub and via from every surface-mount pad on a plane net to its plane, only where the plane has copper under the via, into the routes JSON |
 | `autoroute` | full | builtin | writes artifacts | FreeRouting for the rest, existing copper protected; session merged into the routes JSON |
+| `job_start` | core | builtin | runs the tool it names | Run `autoroute`, `run_drc`, `run_erc`, `pcb_refill_zones`, `render_board` or `review_board` in the background; returns a job id at once |
+| `job_status` | core | builtin | read-only | A job's state, elapsed time, output tail and FreeRouting's pass, unrouted and violation counts; `wait_s` blocks up to 50 s |
+| `job_result` | core | builtin | read-only | The finished job's normal tool result; a failed job raises the tool's error |
 
 ## Review reports
 
@@ -83,6 +89,30 @@ With the board closed (`channel: auto` or `file`) the board file is edited lossl
 the same snapshot, lock-file and conflict rules as schematics, and zones stay unfilled
 until `pcb_refill_zones` runs kicad-cli. A board this process has seen live over the API is
 never edited on disk, because KiCad may still hold unsaved changes to it.
+
+`pcb_move_footprints` takes a list of moves (`ref`, and any of `x`/`y`, `rotation`, `side`) and applies
+them together: one file write with one snapshot, or one KiCad commit with a single undo step. Every
+reference is checked before anything changes. Moving a footprint through the file keeps the absolute
+angles of its pads and texts and carries along the zones inside it (keep-outs, antenna clearances), which
+KiCad stores in board coordinates; `pcb_move_footprint` does the same. Flipping needs the live channel.
+
+`pcb_set_outline` and `pcb_add_mounting_holes` work on the file only (the board closed in KiCad).
+The outline is a rectangle `[x0, y0, x1, y1]` or a polygon; with `corner_radius_mm` every corner becomes a
+tangent arc written the KiCad 10 way, `(gr_arc (start) (mid) (end))`, and the lines are shortened to meet
+it, so the outline stays one closed chain (a radius that does not fit an edge is refused). `replace`
+(default) removes the board's own Edge.Cuts drawings first. A mounting hole is an inline footprint
+`MountingHole:MountingHole_<drill>mm[_Pad]` with `(attr board_only exclude_from_pos_files exclude_from_bom)`:
+plated, with pad number 1 on `net`, when `pad` exceeds the drill, otherwise a bare NPTH. References default
+to the next free `H<n>`.
+
+KiCad finds a board's rules by the board's name only: net classes and constraints in
+`<board>.kicad_pro`, custom rules in `<board>.kicad_dru`. A board copied or renamed without them is
+checked and filled against KiCad's defaults without a word. So `run_drc` and `autoroute` (when
+`project_path` is left to its default) add a warning (`no project file next to the board: KiCad used
+default design rules`), and so does a `.kicad_dru` in the board's folder under another name (the
+copy-with-rename mistake: its rules exist and are not applied). `pcb_refill_zones` refuses with
+`PROJECT_NOT_FOUND` in both cases, since a fill against the wrong clearances is saved into the board;
+`allow_default_rules: true` fills anyway and keeps the warning.
 
 ## Design writes
 
@@ -130,6 +160,21 @@ PCB Editor window open. Every failure is classified: `KICAD_NOT_RUNNING` and
 `KICAD_API_DISABLED` mean the request never reached KiCad; `BOARD_NOT_OPEN`, `IPC_BUSY` and
 `IPC_REJECTED` mean KiCad answered and said no. `IPC_BUSY` is retryable after the user closes
 a dialog or finishes an interactive tool.
+
+A crash shows up as a request that never gets its answer. Every transport failure records the KiCad
+process ids before the call (as of the connection, or per call with logging on) and after it, in the
+server log and in the error; a timeout during which KiCad's process disappeared comes back as
+`KICAD_NOT_RUNNING` ("KiCad exited while the request was pending") instead of `IPC_BUSY`. With
+`KICAD_LAYER_IPC_LOG=1` every request (label, item count, duration, outcome, pids) goes to a rotating
+`<cache>/logs/ipc.log`, the file to attach to a KiCad bug report.
+
+When a write with `channel: auto` cannot go live because KiCad is gone (unreachable and no KiCad
+process runs), or a live write fails that way mid-call, the edit falls back to the file channel, with a
+warning that whatever KiCad had not saved is lost. It never does while a running KiCad holds the board's
+lock file. On the file channel a lock whose owner is gone (a pid that no longer runs, or this host with
+no KiCad running; a lock from another host always counts as held) is skipped with `force`; without it
+the write is refused with `EDIT_CONFLICT` and that hint. At start the server removes such orphaned
+`~*.lck` files under the workspace (four levels deep) and logs each one.
 
 ## The documentation library
 
@@ -227,12 +272,69 @@ trying just past the pad end along the pad's long axis first and then across it;
 their vias inside, between the pin rows, so the signal escapes stay free, small parts put them
 outside. Every candidate is checked against the other pads (an exposed pad's own paste windows
 excepted), the routes handed in, the vias placed so far, keep-outs, plated holes and the board edge.
+A candidate must also land on its plane: on a layer other than the pad's, the net's plane has to cover
+the via's disc grown by the clearance. With the zones filled in the file the fill is the test (a cut-out,
+a thermal gap or another net's island in the plane layer is seen as KiCad filled it); unfilled, the zone
+outline is, minus the outlines of other nets' zones of the same or higher priority on that layer and minus
+keep-outs that forbid pours, and the result warns `zones are unfilled; fill first for exact results`.
+Keep-outs that forbid vias refuse a via on any layer. `plane_layers` (layer to net, as for `autoroute`)
+limits a net's plane to those layers; a plane layer with no zone of its net is taken as solid, with a
+warning. A net of `plane_nets` without a plane anywhere is refused unless it is listed in `fanout_nets`,
+which gives its pads a fan-out via for the autorouter. Pads refused for want of plane copper are listed
+in `rejected` (and in `skipped`) with the reason.
 
 `autoroute` exports the board plus the routes JSON as a Specctra DSN in the dialect KiCad writes
 (micrometres, protected wiring, planes on the plane layers, keep-outs for holes), runs FreeRouting
 headless (`tools/freerouting*.jar` with the Java in `tools/jre`, or `KICAD_LAYER_FREEROUTING` and
 `KICAD_LAYER_JAVA`), parses the session file and merges it over the routes JSON. FreeRouting routes
 pairs as single nets, so run `route_pairs` first.
+
+A DSN carries net classes (one width, one clearance each), class-to-class clearances and keep-outs, and
+nothing else; FreeRouting routes blind through every other rule. So the export sorts the board's rules
+first and the result says what it decided:
+
+* Rule areas (keep-out zones, on the board or inside a footprint) become per-layer DSN keep-outs: tracks
+  not allowed gives a `keepout` (which also stops vias), vias not allowed a `via_keepout`, footprints not
+  allowed a `place_keepout`. A `.kicad_dru` rule that disallows vias or tracks inside a named area
+  (`insideArea`, `enclosedByArea`, `intersectsArea`) with no net in its condition does the same for that
+  area. `keepouts` lists them.
+* Plain two-class rules (`A.NetClass == 'X' && B.NetClass == 'Y'`, `... && B.NetClass != 'X'` for X against
+  every other class, `A.NetClass == 'X'` alone, `hasNetclass` as a synonym) with a clearance, physical
+  clearance or creepage minimum become `class_class` clearances (creepage and physical clearance as a
+  straight clearance, which is stricter). Anything else (an OR, a net name, an item type, an area) is
+  skipped with a warning. `class_clearances` lists what was emitted.
+* `exclude_nets` (names or wildcards) and `exclude_classes` are not routed. With `auto_exclude_ruled_nets`
+  (default on) neither are the nets a rule names by class or name when the rule has a constraint the DSN
+  cannot carry (`disallow`, `creepage`, `physical_clearance`, `physical_hole_clearance`) or a condition on
+  an area, footprint or courtyard, nor nets whose class or `track_width` rule is wider than 2 mm and that
+  have a zone (a pour, not a track). `force_nets` routes a net anyway. An excluded net stays in the DSN
+  with its pins and copper, protected, in a class `<class>_excluded` that goes to FreeRouting's ignore
+  list (`-inc`), so class clearances still apply to it; the filled pour of an excluded net is a keep-out,
+  an unfilled one only an outline (refill first). FreeRouting before 2.4 applies `-inc` only in its GUI,
+  so whatever it draws on an excluded net headless is dropped from the session (`dropped_segments`).
+  `excluded_nets` gives each net with its reason: route those by hand and check with `run_drc`.
+
+## Background jobs
+
+An MCP client gives a tool call about a minute. FreeRouting on a real board, DRC or a zone refill on a
+couple of hundred parts, and a high-quality render take longer: the client gives up while the work goes
+on unseen. `job_start` runs one of those tools (`autoroute`, `run_drc`, `run_erc`, `pcb_refill_zones`,
+`render_board`, `review_board`) in a thread of the server with the arguments a direct call takes, checked
+the same way, and answers at once with a job id. The tool must be in this server's tier (`autoroute` and
+`pcb_refill_zones` need `full`) and keeps its own rules (`pcb_refill_zones` still needs write mode).
+`job_status` gives the state (`queued`, `running`, `done`, `failed`), the seconds so far, the last lines of
+output (the kicad-cli command, FreeRouting's log) and, for `autoroute`, `progress` with FreeRouting's
+`pass`, `phase`, `unrouted` and `violations` read from its log; `wait_s` (up to 50 s) waits for the end
+before answering, which saves polls. `job_result` returns the tool's normal result (its structured output;
+for `render_board` the text with the PNG path, to be read as an image) or, for a failed job, raises the
+tool's error with its code (`JOB_FAILED` when it had none).
+
+A call returning never stops the work, and a subprocess is never killed for it. Jobs live in memory and in
+one JSON file each under `<cache>/jobs`; after a server restart a finished job still gives its result, a
+job that was running is `lost`, an id never seen is `unknown`. FreeRouting has no save-and-stop command
+when headless: at `autoroute`'s `timeout_s` the process is asked to terminate, killed after fifteen
+seconds, and a session file it wrote before that is still parsed and merged (the log tail says so);
+without one the call fails with `ROUTER_FAILED` as before.
 
 ## Verdicts
 
@@ -247,6 +349,14 @@ pairs as single nets, so run `route_pairs` first.
 | `BLOCKED` | kicad-cli could not run the check (bad file, bad arguments) |
 | `EMPTY` | Nothing to check |
 
+The findings list is capped at 200 (`truncated: true`, the full list in `report_path`). A big board's
+DRC runs to hundreds of kilobytes, more than an MCP client takes, so ask it with `summary: true` first:
+`findings` is then empty and `summary` holds the active findings per KiCad type (`by_type`), per constraint
+named in the description (`by_rule`: `rule:<name>` for a custom rule, `netclass:<name>`, `board` for the
+board setup), per severity, the `top` (default 20) worst violations sorted by deficit (required minus actual
+for a minimum, actual minus required for a maximum; findings without a measure follow in report order), the
+unconnected count and up to `top` unconnected pairs. `report_path` is the kicad-cli JSON to read for the rest.
+
 ## Errors
 
 Anticipated failures come back as `is_error` results whose text starts with a stable code:
@@ -254,5 +364,5 @@ Anticipated failures come back as `is_error` results whose text starts with a st
 `KICAD_CLI_NOT_FOUND`, `KICAD_CLI_FAILED`, `KICAD_CLI_TIMEOUT`, `KICAD_NOT_RUNNING`,
 `KICAD_API_DISABLED`, `BOARD_NOT_OPEN`, `PROJECT_NOT_FOUND`, `NOT_FOUND_IN_DESIGN`,
 `INVALID_ARGUMENT`, `IPC_BUSY`, `IPC_REJECTED`, `DOC_FETCH_FAILED`, `DOC_NOT_PDF`, `PARTS_FETCH_FAILED`,
-`LIB_FETCH_FAILED`. Each carries
+`LIB_FETCH_FAILED`, `JOB_FAILED`. Each carries
 a hint saying what to do next.

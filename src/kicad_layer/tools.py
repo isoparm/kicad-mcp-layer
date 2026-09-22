@@ -9,10 +9,11 @@ picks the tier: ``core`` (checks, exports, renders, reviews, libraries, document
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Image
@@ -21,7 +22,9 @@ from pydantic import Field
 
 from kicad_layer import capabilities as caps
 from kicad_layer.config import TIERS
+from kicad_layer.errors import INVALID_ARGUMENT, JOB_FAILED, LayerError
 from kicad_layer import docs as docs_mod
+from kicad_layer import jobs as jobs_mod
 from kicad_layer import easyeda as easyeda_mod
 from kicad_layer import doctor as doctor_mod
 from kicad_layer import jlcpcb as jlcpcb_mod
@@ -60,6 +63,8 @@ from kicad_layer.models import (
     ExportResult,
     FootprintHit,
     FootprintInfo,
+    FootprintMove,
+    MountingHole,
     FootprintPadInfo,
     LibIndexStatus,
     LibSearchResult,
@@ -72,6 +77,8 @@ from kicad_layer.models import (
     SymbolPinInfo,
     TraceResult,
     VerdictReport,
+    JobResult,
+    JobStatus,
     ImpedanceResult,
     PartsSearch,
     RouteReport,
@@ -123,6 +130,8 @@ SchematicPath = Annotated[
     Field(description="A .kicad_sch file, absolute or relative to the workspace. Any sheet of the project works; the root sheet is used."),
 ]
 BoardPath = Annotated[str, Field(description="A .kicad_pcb file, absolute or relative to the workspace.")]
+Summary = Annotated[bool, Field(description="Counts per type and per rule, the worst violations and the unconnected pairs instead of every finding; the full list stays in report_path. Use it on big boards.")]
+Top = Annotated[int, Field(description="With summary: how many worst violations and unconnected pairs to list.", ge=1, le=200)]
 
 
 # Tool groups. The core tier is everything that reads, checks, exports, renders, reviews or documents;
@@ -135,12 +144,15 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "libraries": ('lib_search', 'sym_info', 'fp_info', 'lib_index', 'lib_fetch'),
     "sch_read": ('sch_list_components', 'sch_get_symbol'),
     "sch_edit": ('sch_set_property', 'sch_add_component', 'sch_wire', 'sch_label', 'sch_mark', 'sch_delete', 'sch_annotate'),
-    "pcb_edit": ('pcb_place_footprint', 'pcb_move_footprint', 'pcb_add_track', 'pcb_add_via', 'pcb_add_zone', 'pcb_refill_zones', 'pcb_delete_items', 'pcb_save'),
+    "pcb_edit": ('pcb_place_footprint', 'pcb_move_footprint', 'pcb_add_track', 'pcb_add_via', 'pcb_add_zone', 'pcb_refill_zones', 'pcb_delete_items', 'pcb_save', 'pcb_move_footprints', 'pcb_set_outline', 'pcb_add_mounting_holes'),
     "review": ('review_board', 'review_schematic', 'review_project'),
     "signal_integrity": ('route_check', 'impedance_calc', 'stackup_info', 'parts_search'),
     "routers": ('route_pairs', 'stitch_planes', 'autoroute'),
     "docs": ('doc_fetch', 'doc_import', 'doc_list', 'doc_text', 'doc_page', 'doc_sections', 'doc_facts'),
+    "jobs": ('job_start', 'job_status', 'job_result'),
 }
+# the tools job_start may run in the background: the ones that can outlast a client's request timeout
+JOB_TOOLS = ("autoroute", "run_drc", "run_erc", "pcb_refill_zones", "render_board", "review_board")
 FULL_ONLY = ('sch_edit', 'pcb_edit', 'routers')
 TOOL_NAMES: tuple[str, ...] = tuple(n for names in GROUPS.values() for n in names)
 
@@ -184,12 +196,15 @@ def _register_checks(mcp: MCPServer) -> None:
             Literal["default", "all", "error", "warning"],
             Field(description="all (default) includes excluded violations flagged as excluded; default is errors and warnings only."),
         ] = "all",
+        summary: Summary = False,
+        top: Top = 20,
     ) -> VerdictReport:
         """Run KiCad's Electrical Rules Check on the whole schematic hierarchy with kicad-cli and return
-        a verdict (PASS, WARN, FAIL, or UNVERIFIED when no report was produced) with every finding,
-        keyed by stable ids and item UUIDs. Works whether or not KiCad is open."""
+        a verdict (PASS, WARN, FAIL, or UNVERIFIED when no report was produced) with its findings (at most
+        200; summary=true for counts and the worst ones), keyed by stable ids and item UUIDs. Works whether
+        or not KiCad is open."""
         root = root_schematic_for(schematic_path)
-        return reports.run_erc(root, severity=severity)
+        return reports.run_erc(root, severity=severity, summary=summary, top=top)
 
     @mcp.tool(annotations=READ_ONLY)
     def run_drc(
@@ -197,12 +212,16 @@ def _register_checks(mcp: MCPServer) -> None:
         severity: Literal["default", "all", "error", "warning"] = "all",
         schematic_parity: Annotated[bool, Field(description="Also compare the board against the schematic next to it.")] = True,
         all_track_errors: Annotated[bool, Field(description="Report every track error instead of the first per track.")] = False,
+        summary: Summary = False,
+        top: Top = 20,
     ) -> VerdictReport:
         """Run KiCad's Design Rules Check on a board with kicad-cli. The verdict counts clearance and
         other violations, unconnected items (unrouted nets), and schematic parity problems; a board with
-        unrouted nets is never PASS. Works whether or not KiCad is open."""
+        unrouted nets is never PASS. At most 200 findings are listed; summary=true gives counts per type
+        and per rule, the worst violations by deficit and the unconnected pairs. Works whether or not
+        KiCad is open."""
         board = resolve_in_workspace(board_path, suffixes=(BOARD,))
-        return reports.run_drc(board, severity=severity, schematic_parity=schematic_parity, all_track_errors=all_track_errors)
+        return reports.run_drc(board, severity=severity, schematic_parity=schematic_parity, all_track_errors=all_track_errors, summary=summary, top=top)
 
     @mcp.tool(annotations=READ_ONLY)
     def sch_netlist(
@@ -643,10 +662,13 @@ def _register_pcb_edit(mcp: MCPServer) -> None:
     def pcb_refill_zones(
         board_path: EditBoardPath = None,
         channel: Channel = "auto",
+        allow_default_rules: Annotated[bool, Field(description="Fill even when the board has no <name>.kicad_pro (or its custom rules sit under another name), i.e. with KiCad's default clearances.")] = False,
     ) -> BoardEditResult:
         """Refill every copper zone. Live: KiCad fills in place. File: kicad-cli fills and saves the
-        board. Run this after any copper edit and before DRC. Requires write mode."""
-        return pcb_tools.refill_zones(board_path, channel=channel)
+        board. Run this after any copper edit and before DRC. Refuses (PROJECT_NOT_FOUND) when the
+        board's own .kicad_pro is missing, because KiCad would fill against its default rules.
+        Requires write mode."""
+        return pcb_tools.refill_zones(board_path, channel=channel, allow_default_rules=allow_default_rules)
 
     @mcp.tool(annotations=DESIGN_WRITE)
     def pcb_delete_items(
@@ -667,6 +689,46 @@ def _register_pcb_edit(mcp: MCPServer) -> None:
         """Ask KiCad to save the open board to disk, so kicad-cli tools such as run_drc and export_fab
         see the live edits. Requires write mode and the board open in the PCB Editor."""
         return pcb_tools.save_board(board_path)
+
+    @mcp.tool(annotations=DESIGN_WRITE)
+    def pcb_move_footprints(
+        moves: Annotated[list[FootprintMove], Field(description="One entry per footprint: ref, and any of x, y (together), rotation, side.", min_length=1)],
+        board_path: EditBoardPath = None,
+        channel: Channel = "auto",
+        dry_run: DryRun = False,
+        force: Force = False,
+    ) -> BoardEditResult:
+        """Move, rotate or flip several footprints at once: one file write, or one KiCad commit (one undo
+        step). Every reference is checked first, so an unknown one moves nothing. Pads and texts keep
+        their absolute angles and zones inside a footprint move with it, as with pcb_move_footprint;
+        extra.moves has each ref before and after. Requires write mode."""
+        return pcb_tools.move_footprints(board_path, [m.model_dump() for m in moves], channel=channel, dry_run=dry_run, force=force)
+
+    @mcp.tool(annotations=DESIGN_WRITE)
+    def pcb_set_outline(
+        board_path: BoardPath,
+        rect: Annotated[list[float] | None, Field(description="[x0, y0, x1, y1] in mm.", min_length=4, max_length=4)] = None,
+        polygon: Annotated[list[list[float]] | None, Field(description="[[x, y], ...] corners in mm, in order; closed automatically.")] = None,
+        corner_radius_mm: Annotated[float, Field(ge=0, description="Round every corner with a tangent arc of this radius.")] = 0,
+        replace: Annotated[bool, Field(description="Remove the board's existing Edge.Cuts drawings first.")] = True,
+        dry_run: DryRun = False,
+        force: Force = False,
+    ) -> BoardEditResult:
+        """Write the board outline on Edge.Cuts as lines and three-point arcs, as KiCad 10 draws them.
+        File channel only: the board must not be open in KiCad. Requires write mode."""
+        return pcb_tools.set_outline(board_path, rect=rect, polygon=polygon, corner_radius_mm=corner_radius_mm, replace=replace, dry_run=dry_run, force=force)
+
+    @mcp.tool(annotations=DESIGN_WRITE)
+    def pcb_add_mounting_holes(
+        board_path: BoardPath,
+        holes: Annotated[list[MountingHole], Field(description="One entry per hole: x, y, drill, and optionally pad, net, ref.", min_length=1)],
+        dry_run: DryRun = False,
+        force: Force = False,
+    ) -> BoardEditResult:
+        """Add mounting holes as footprints embedded in the board (board only, excluded from the BOM and
+        position files): plated with a pad when pad exceeds the drill, on a net if given, else bare NPTH.
+        File channel only. Requires write mode."""
+        return pcb_tools.add_mounting_holes(board_path, [h.model_dump() for h in holes], dry_run=dry_run, force=force)
 
     # ---- design review ------------------------------------------------------------------
 
@@ -794,16 +856,22 @@ def _register_routers(mcp: MCPServer) -> None:
         routes_out: RoutesOut = None,
         plane_nets: Annotated[list[str] | None, Field(description="Nets with a plane; default: the nets of the board's zones.")] = None,
         keepouts: Keepouts = None,
+        plane_layers: Annotated[dict[str, str] | None, Field(description="Layer -> net for the plane layers, as for autoroute; only those layers count as the net's plane.")] = None,
+        fanout_nets: Annotated[list[str] | None, Field(description="Nets without a plane whose pads still get a via, a fan-out for the autorouter.")] = None,
     ) -> StitchReport:
         """Give every surface-mount pad on a plane net a short stub and a via to its plane, checked
-        against the other pads, the routes handed in, keep-outs and the board edge. Connectors get their
-        vias inside, in the channel between the pin rows; small parts outside. Pads with no clear spot
-        are listed and left for the autorouter. Writes a routes JSON (the input routes plus the stitches)."""
+        against the other pads, the routes handed in, keep-outs and the board edge. A via is only placed
+        where the net's plane has copper under it on another layer: the zone fill when the board is
+        filled, else the zone outline minus other nets' zones and keep-outs (with a warning to fill first).
+        Connectors get their vias inside, in the channel between the pin rows; small parts outside. Pads
+        with no clear spot are listed and left for the autorouter; those refused for want of plane copper
+        are in rejected. Writes a routes JSON (the input routes plus the stitches)."""
         board = resolve_in_workspace(board_path, suffixes=(BOARD,))
         project = resolve_in_workspace(project_path) if project_path else None
         return routing_tools.stitch_planes(board, project, routes_in=resolve_in_workspace(routes_in) if routes_in else None,
                                            routes_out=resolve_in_workspace(routes_out, must_exist=False) if routes_out else None,
-                                           plane_nets=plane_nets, keepouts=[tuple(k) for k in keepouts] if keepouts else None)
+                                           plane_nets=plane_nets, keepouts=[tuple(k) for k in keepouts] if keepouts else None,
+                                           plane_layers=plane_layers, fanout_nets=fanout_nets)
 
     @mcp.tool(annotations=WRITES_ARTIFACTS)
     def autoroute(
@@ -815,17 +883,24 @@ def _register_routers(mcp: MCPServer) -> None:
         routable_layers: Annotated[list[str] | None, Field(description="Layers the autorouter may use; default every copper layer that is not a plane.")] = None,
         passes: Annotated[int, Field(description="FreeRouting optimisation passes.", ge=1, le=200)] = 40,
         timeout_s: Annotated[float, Field(description="Give up after this long.", ge=60, le=7200)] = 3000.0,
+        exclude_nets: Annotated[list[str] | None, Field(description="Nets (names or wildcards) not to route; their copper stays as a protected obstacle.")] = None,
+        exclude_classes: Annotated[list[str] | None, Field(description="Net classes not to route, the same way.")] = None,
+        auto_exclude_ruled_nets: Annotated[bool, Field(description="Also leave out nets that .kicad_dru rules the DSN cannot carry name (creepage, physical clearance, disallow, area or footprint conditions) and pour-width nets with a zone; the result lists them.")] = True,
+        force_nets: Annotated[list[str] | None, Field(description="Nets to route even though auto_exclude_ruled_nets would leave them out.")] = None,
     ) -> AutorouteReport:
         """Route what is still unrouted with FreeRouting: the board and the routes JSON handed in go out as
         a Specctra DSN with the existing copper protected, the headless router runs (tools/freerouting*.jar
         with the Java in tools/jre or KICAD_LAYER_FREEROUTING / KICAD_LAYER_JAVA), and the session file
         comes back merged into the routes JSON. Differential pairs should be routed first with route_pairs;
-        FreeRouting routes them as single nets."""
+        FreeRouting routes them as single nets. Keep-out rule areas become DSN keep-outs, plain two-class
+        clearance rules of the .kicad_dru become class_class rules, and nets the router cannot route safely
+        are excluded and listed with the reason (excluded_nets); route those by hand."""
         board = resolve_in_workspace(board_path, suffixes=(BOARD,))
         project = resolve_in_workspace(project_path) if project_path else None
         return routing_tools.autoroute(board, project, routes_in=resolve_in_workspace(routes_in) if routes_in else None,
                                        routes_out=resolve_in_workspace(routes_out, must_exist=False) if routes_out else None,
-                                       plane_layers=plane_layers, routable_layers=routable_layers, passes=passes, timeout_s=timeout_s)
+                                       plane_layers=plane_layers, routable_layers=routable_layers, passes=passes, timeout_s=timeout_s,
+                                       exclude_nets=exclude_nets, exclude_classes=exclude_classes, auto_exclude_ruled_nets=auto_exclude_ruled_nets, force_nets=force_nets)
 
     # ---- documentation ------------------------------------------------------------------
 
@@ -979,7 +1054,70 @@ def _register_docs(mcp: MCPServer) -> None:
         return DocFacts(part=part, found=True, path=display(path), section=section, text=text, sections=headings)
 
 
-REGISTRARS = {"diagnostics": _register_diagnostics, "checks": _register_checks, "exports": _register_exports, "board_read": _register_board_read, "libraries": _register_libraries, "sch_read": _register_sch_read, "sch_edit": _register_sch_edit, "pcb_edit": _register_pcb_edit, "review": _register_review, "signal_integrity": _register_signal_integrity, "routers": _register_routers, "docs": _register_docs}
+def _register_jobs(mcp: MCPServer, tier: str = "core") -> None:
+    available = set(tool_names(tier))
+
+    def _status(job) -> JobStatus:
+        hints = {"queued": "Poll job_status.", "running": "Poll job_status (wait_s blocks up to 50 s); the work goes on meanwhile.",
+                 "done": "job_result has the result.", "lost": "Start the job again.", "failed": "job_result raises the tool's error."}
+        return JobStatus(id=job.id, tool=job.tool, state=job.state, elapsed_s=job.elapsed(), progress=dict(job.progress), log_tail=list(job.lines)[-15:],
+                         error=job.error, hint=hints.get(job.state))
+
+    def _result_of(call) -> Any:
+        if call.structured_content is not None:
+            return call.structured_content
+        return {"text": [c.text for c in call.content if getattr(c, "type", "") == "text"]}
+
+    @mcp.tool(annotations=WRITES_ARTIFACTS)
+    def job_start(
+        tool: Annotated[Literal[JOB_TOOLS], Field(description="The tool to run in the background.")],  # type: ignore[valid-type]
+        args: Annotated[dict[str, Any] | None, Field(description="Its arguments, exactly as for a direct call.")] = None,
+    ) -> JobStatus:
+        """Run a long tool (autoroute, run_drc, run_erc, pcb_refill_zones, render_board, review_board) in the
+        background of this server and return a job id at once, so a big board does not hit the client's
+        request timeout. Poll job_status, then take the tool's normal result from job_result. The tool
+        checks its arguments and its tier as a direct call would; the work is never stopped because a call returned."""
+        if tool not in available:
+            raise LayerError(INVALID_ARGUMENT, f"{tool} is not registered in the {tier} tier of this server.",
+                             hint="Start the server with KICAD_LAYER_TOOLS=full for the design-edit and routing tools.")
+        arguments = dict(args or {})
+        job = jobs_mod.runner().start(tool, arguments, lambda: _result_of(asyncio.run(mcp.call_tool(tool, arguments))))
+        return _status(job)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def job_status(
+        job_id: Annotated[str, Field(description="The id job_start returned.")],
+        wait_s: Annotated[float, Field(description="Wait up to this long for the job to finish before answering.", ge=0, le=50)] = 0,
+    ) -> JobStatus:
+        """The state of a background job (queued, running, done, failed; lost when the server restarted while
+        it ran, unknown for an id this server never saw), the time so far, the last lines of its output and,
+        for autoroute, FreeRouting's pass, unrouted and violation counts."""
+        job = jobs_mod.runner().wait(job_id, wait_s)
+        if job is None:
+            return JobStatus(id=job_id, state="unknown", hint="No job with this id; job_start gives one.")
+        return _status(job)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def job_result(
+        job_id: Annotated[str, Field(description="The id job_start returned.")],
+    ) -> JobResult:
+        """The finished job's result: what the tool returns when called directly (render_board: the text with
+        the PNG path; read the PNG to see it). While the job runs, its state; a failed job raises the tool's
+        error (JOB_FAILED when it had no code of its own)."""
+        job = jobs_mod.runner().get(job_id)
+        if job is None:
+            return JobResult(id=job_id, state="unknown", hint="No job with this id; job_start gives one.")
+        if job.state == "failed":
+            raise LayerError(job.error_code or JOB_FAILED, f"job {job.id} ({job.tool}) failed after {job.elapsed()} s: {job.error}",
+                             hint="Fix the cause and start the job again.")
+        if job.state == "lost":
+            raise LayerError(JOB_FAILED, f"job {job.id} ({job.tool}) is lost: {job.error}", hint="Start the job again.")
+        if job.state != "done":
+            return JobResult(id=job.id, tool=job.tool, state=job.state, elapsed_s=job.elapsed(), hint="Still running; poll job_status.")
+        return JobResult(id=job.id, tool=job.tool, state="done", elapsed_s=job.elapsed(), result=job.result)
+
+
+REGISTRARS = {"diagnostics": _register_diagnostics, "checks": _register_checks, "exports": _register_exports, "board_read": _register_board_read, "libraries": _register_libraries, "sch_read": _register_sch_read, "sch_edit": _register_sch_edit, "pcb_edit": _register_pcb_edit, "review": _register_review, "signal_integrity": _register_signal_integrity, "routers": _register_routers, "docs": _register_docs, "jobs": _register_jobs}
 
 
 def register_tools(mcp: MCPServer, tier: str = "core") -> None:
@@ -987,5 +1125,7 @@ def register_tools(mcp: MCPServer, tier: str = "core") -> None:
     if tier not in TIERS:
         raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
     for group in GROUPS:
-        if tier == "full" or group not in FULL_ONLY:
+        if group == "jobs":
+            _register_jobs(mcp, tier)  # it needs to know which tools this server has
+        elif tier == "full" or group not in FULL_ONLY:
             REGISTRARS[group](mcp)

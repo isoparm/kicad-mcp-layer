@@ -7,11 +7,17 @@ disk, and never for a board this process has already seen live.
 
 KiCad serialises requests anyway, so one lock guards every call. Connecting runs on a
 helper thread with a bound, because a dial can hang when a pipe exists but nobody answers.
+
+With ``KICAD_LAYER_IPC_LOG=1`` every call is logged (label, item count, duration, outcome) to a
+rotating file ``<cache>/logs/ipc.log``. Whatever the setting, a transport failure records the KiCad
+process ids before and after the call (in the log and in the error's data), and a request that
+timed out while KiCad's process disappeared is reported as KiCad having exited, not as busy.
 """
 
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
 import threading
 import time
@@ -34,6 +40,56 @@ from kicad_layer.ipc.probe import kicad_processes, resolved_address
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
+
+_ipc_log: logging.Logger | None = None
+_ipc_log_lock = threading.Lock()
+
+
+def ipc_log() -> logging.Logger | None:
+    """The request logger when KICAD_LAYER_IPC_LOG=1, else None."""
+    global _ipc_log
+    if os.environ.get("KICAD_LAYER_IPC_LOG", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return None
+    with _ipc_log_lock:
+        target = settings().cache_dir / "logs" / "ipc.log"
+        if _ipc_log is None or getattr(_ipc_log, "_target", None) != target:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            lg = logging.getLogger("kicad_layer.ipc.requests")
+            lg.propagate = False
+            lg.setLevel(logging.INFO)
+            for h in list(lg.handlers):
+                lg.removeHandler(h)
+                h.close()
+            h = logging.handlers.RotatingFileHandler(target, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+            h.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            lg.addHandler(h)
+            lg._target = target  # type: ignore[attr-defined]
+            _ipc_log = lg
+        return _ipc_log
+
+
+def _kicad_pids() -> list[int]:
+    from kicad_layer.locks import kicad_pids
+
+    try:
+        return kicad_pids()
+    except Exception:  # never let diagnostics break a call
+        return []
+
+
+def _count(result: Any) -> int | None:
+    if isinstance(result, (list, tuple, set, dict)):
+        return len(result)
+    try:
+        return len(result)  # protobuf repeated fields and similar
+    except TypeError:
+        return None
+
+
+def _is_transport(exc: BaseException) -> bool:
+    """A failure of the pipe itself rather than an answer from KiCad."""
+    mod = type(exc).__module__ or ""
+    return mod.startswith("pynng") or isinstance(exc, (ConnectionError, BrokenPipeError, EOFError))
 
 
 class Unreachable(LayerError):
@@ -58,7 +114,7 @@ def classify(exc: BaseException) -> LayerError:
             return Rejected(
                 IPC_BUSY,
                 "KiCad did not answer in time.",
-                hint="A modal dialog or an interactive tool may be open in KiCad; finish it and retry.",
+                hint="A modal dialog or an interactive tool may be open in KiCad; finish it and retry. If KiCad closed, it crashed: kicad_doctor says which.",
                 retryable=True,
             )
         if kicad_processes():
@@ -84,12 +140,19 @@ def classify(exc: BaseException) -> LayerError:
             return Rejected(
                 IPC_REJECTED,
                 f"KiCad has no handler for this request: {exc}",
-                hint="The PCB Editor window is probably not open. Some requests also need KiCad 11.",
+                hint="The PCB Editor window is not open, is busy (a dialog or an interactive tool), or KiCad crashed; run kicad_doctor, open the PCB Editor and retry.",
             )
         if code == S.AS_UNIMPLEMENTED:
             return Rejected(IPC_REJECTED, f"KiCad 10 does not implement this request: {exc}")
         return Rejected(IPC_REJECTED, f"KiCad rejected the request: {exc}")
-    return Rejected(IPC_REJECTED, f"{type(exc).__name__}: {exc}")
+    if _is_transport(exc):
+        running = bool(kicad_processes())
+        return Unreachable(
+            KICAD_API_DISABLED if running else KICAD_NOT_RUNNING,
+            f"The connection to KiCad failed ({type(exc).__name__}: {exc})" + ("." if running else "; KiCad is no longer running."),
+            hint="KiCad may have crashed or closed its API endpoint; run kicad_doctor, reopen the board and retry.",
+        )
+    return Rejected(IPC_REJECTED, f"{type(exc).__name__}: {exc}", hint="Unexpected answer from KiCad; run kicad_doctor. A busy or crashed editor looks like this too.")
 
 
 def _canonical(path: os.PathLike[str] | str) -> str:
@@ -104,6 +167,7 @@ class Session:
         self._kicad: Any = None
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kicad-ipc-connect")
         self.seen_live: set[str] = set()
+        self.known_pids: list[int] | None = None  # KiCad's process ids when the session connected
 
     # -- connection -----------------------------------------------------------------
 
@@ -144,7 +208,8 @@ class Session:
                     raise
                 except Exception as exc:
                     raise classify(exc) from exc
-                log.info("connected to KiCad at %s", resolved_address()[0])
+                self.known_pids = _kicad_pids()
+                log.info("connected to KiCad at %s (KiCad pids %s)", resolved_address()[0], self.known_pids)
             return self._kicad
 
     def reset(self) -> None:
@@ -153,8 +218,41 @@ class Session:
 
     # -- guarded calls --------------------------------------------------------------
 
-    def call(self, fn: Callable[[], T], *, retries: int = 2) -> T:
+    def call(self, fn: Callable[[], T], *, retries: int = 2, label: str | None = None) -> T:
         """Run ``fn`` under the session lock, classifying failures and retrying busy states."""
+        name = label or getattr(fn, "__qualname__", None) or repr(fn)
+        rec = ipc_log()
+        before = _kicad_pids() if rec is not None else self.known_pids
+        started = time.monotonic()
+        try:
+            result = self._call(fn, retries=retries)
+        except LayerError as err:
+            transport = isinstance(err, Unreachable) or (err.code == IPC_BUSY and "did not answer in time" in str(err))
+            if transport:
+                after = _kicad_pids()
+                err.data.setdefault("kicad_pids_before", before)
+                err.data["kicad_pids_after"] = after
+                gone = sorted(set(before or []) - set(after)) if before is not None else []
+                log.warning("IPC transport failure in %s after %.2f s: %s; KiCad pids before %s, after %s", name, time.monotonic() - started, err.code, before, after)
+                if err.code == IPC_BUSY and (gone or (before is None and not after)):
+                    self.reset()
+                    crashed = Unreachable(
+                        KICAD_NOT_RUNNING,
+                        "KiCad exited while the request was pending" + (f" (pid {', '.join(map(str, gone))} is gone)" if gone else "") + ": it probably crashed.",
+                        hint="Reopen the board in KiCad (its autosave may hold recent edits) and retry; KICAD_LAYER_IPC_LOG=1 logs every request for a report.",
+                        data=dict(err.data),
+                    )
+                    if rec is not None:
+                        rec.info("%s FAILED %s %.3fs pids %s -> %s", name, crashed.code, time.monotonic() - started, before, after)
+                    raise crashed from err
+            if rec is not None:
+                rec.info("%s FAILED %s %.3fs pids %s -> %s", name, err.code, time.monotonic() - started, before, err.data.get("kicad_pids_after"))
+            raise
+        if rec is not None:
+            rec.info("%s ok items=%s %.3fs", name, _count(result), time.monotonic() - started)
+        return result
+
+    def _call(self, fn: Callable[[], T], *, retries: int = 2) -> T:
         from kipy.errors import ApiError
         from kipy.proto.common.envelope_pb2 import ApiStatusCode as S
 
@@ -197,7 +295,7 @@ class Session:
                 out.append((d, Path(project_dir) / name if project_dir else Path(name)))
             return out
 
-        return self.call(work)
+        return self.call(work, label="get_open_documents")
 
     def board(self, board_path: Path | None = None) -> tuple[Any, Path]:
         """Bind a kipy Board to the requested open board (or the only open one)."""

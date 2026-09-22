@@ -52,6 +52,12 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logging.getLogger(__name__).info("kicad-mcp-layer %s starting on stdio (pid %s)", __version__, os.getpid())
+    try:
+        from kicad_layer.locks import clean_orphan_locks
+
+        clean_orphan_locks(settings().workspace_root)  # locks a crashed KiCad left behind; each removal is logged
+    except Exception as exc:  # a scan problem must not stop the server
+        logging.getLogger(__name__).warning("orphan lock scan failed: %s", exc)
     build_server().run("stdio")
 
 

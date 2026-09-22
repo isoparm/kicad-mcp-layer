@@ -6,6 +6,11 @@ the side that suits the footprint: connectors keep their vias inside, in the cha
 rows, so the signal escapes on the outside stay free; small parts put the via on the outside. Every
 candidate is checked against the other pads, the routes already on the board, the vias placed so far,
 keep-outs and the board edge. Pads that cannot be stitched are reported and left to the autorouter.
+
+A via must also land on its plane: ``plane_cover`` checks that the net's plane has copper under it on a
+layer other than the pad's (the fill when the zones are filled, the outlines minus other nets' zones and
+keep-outs when not), and keep-outs that forbid vias are respected. Pads with no spot over the plane are
+reported under ``rejected`` with the reason.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .pairrouter import _pad_rect
+from .plane_cover import PlaneCoverage
 from ..review import BoardModel, PadGeo, load_board
 from ..routing import load_netclasses, netclass_for
 from .ses import RouteSegment, Routes, RouteVia
@@ -28,10 +34,16 @@ class StitchResult:
     joined: int = 0  # pads linked to a same-net pad of their footprint instead of a via
     in_pad: int = 0  # large pads that took the via inside
     skipped: list[str] = None  # "REF-PIN net: reason"
+    rejected: list[str] = None  # pads refused because no via spot reaches their plane, "REF-PIN net: reason"
+    warnings: list[str] = None
 
     def __post_init__(self):
         if self.skipped is None:
             self.skipped = []
+        if self.rejected is None:
+            self.rejected = []
+        if self.warnings is None:
+            self.warnings = []
 
 
 def _rect_dist(x: float, y: float, r: tuple[float, float, float, float]) -> float:
@@ -64,19 +76,25 @@ def _seg_seg_dist(a, b, c, d) -> float:
 
 def stitch_planes(board: Path, project: Path | None = None, *, existing: Routes | None = None, plane_nets: set[str] | None = None,
                   keepouts: list[tuple[float, float, float, float]] = (), via: tuple[float, float] | None = None,
-                  layers: tuple[str, str] = ("F.Cu", "B.Cu")) -> StitchResult:
+                  layers: tuple[str, str] = ("F.Cu", "B.Cu"), plane_layers: dict[str, str] | None = None,
+                  fanout_nets: set[str] | None = None) -> StitchResult:
     """``plane_nets`` may include nets without a plane: those pads get a fan-out via for the autorouter to reach on
-    the other layer, placed on the open side of a connector (the channel between pin rows is full of plane vias)."""
+    the other layer, placed on the open side of a connector (the channel between pin rows is full of plane vias).
+    ``fanout_nets`` limits that to the nets named; ``None`` lets every plane-less net of ``plane_nets`` fan out.
+    ``plane_layers`` (layer -> net, as for the autorouter) says which layers are the planes; a plane layer without
+    a zone of its net is taken as solid."""
     bm: BoardModel = load_board(board)
     if project is None:
         cand = board.with_suffix(".kicad_pro")
         project = cand if cand.is_file() else None
     classes, assignments = load_netclasses(project)
-    real_planes = {z.net for z in bm.zones if z.net}
-    nets = plane_nets or real_planes
+    coverage = PlaneCoverage(bm, plane_layers)
+    real_planes = {z.net for z in bm.zones if z.net and not z.rule_area} | set((plane_layers or {}).values())
+    nets = set(plane_nets or real_planes) | set(fanout_nets or ())
     existing = existing or Routes()
     out = Routes()
-    result = StitchResult(routes=out)
+    result = StitchResult(routes=out, warnings=list(coverage.warnings))
+    NO_PLANE = "no plane copper under the via"
     ox0, oy0, ox1, oy1 = bm.outline or (-1e9, -1e9, 1e9, 1e9)
     edge = 0.5
 
@@ -100,6 +118,12 @@ def stitch_planes(board: Path, project: Path | None = None, *, existing: Routes 
         big = len(f.pads) > 12
         for p in f.pads:
             if p.kind != "smd" or p.net not in nets:
+                continue
+            has_plane = p.net in coverage.nets
+            if not has_plane and fanout_nets is not None and p.net not in fanout_nets:
+                why = f"{f.ref}-{p.number} {p.net}: no {p.net} plane on any layer"
+                result.rejected.append(why)
+                result.skipped.append(why)
                 continue
             _, cls = netclass_for(p.net, classes, assignments)
             clearance = float(cls.get("clearance", 0.2))
@@ -187,6 +211,12 @@ def stitch_planes(board: Path, project: Path | None = None, *, existing: Routes 
                     if not ok:
                         reasons.append(reason)
                         continue
+                    if coverage.via_forbidden(vx, vy, v_r):
+                        reasons.append("via in a keep-out that forbids vias")
+                        continue
+                    if has_plane and not coverage.reaches(p.net, vx, vy, v_r + clearance, layer):
+                        reasons.append(NO_PLANE)
+                        continue
                     out.segments.append(RouteSegment(p.net, layer, width, round(stub_a[0], 4), round(stub_a[1], 4), round(vx, 4), round(vy, 4)))
                     out.vias.append(RouteVia(p.net, round(vx, 4), round(vy, 4), v_size, v_drill))
                     vias_all.append(((vx, vy), v_size, p.net))
@@ -206,6 +236,11 @@ def stitch_planes(board: Path, project: Path | None = None, *, existing: Routes 
                         if any(_rect_dist(vx, vy, r) < v_size / 2 + NPTH_GAP for _, r in holes):
                             continue
                         if any(math.dist((qx, qy), (vx, vy)) < v_drill + hole_gap for (qx, qy), _, _ in vias_all):
+                            continue
+                        if coverage.via_forbidden(vx, vy, v_size / 2):
+                            continue
+                        if has_plane and not coverage.reaches(p.net, vx, vy, v_size / 2 + clr, layer):
+                            reasons.append(NO_PLANE)
                             continue
                         out.vias.append(RouteVia(p.net, round(vx, 4), round(vy, 4), v_size, v_drill))
                         vias_all.append(((vx, vy), v_size, p.net))
@@ -249,5 +284,7 @@ def stitch_planes(board: Path, project: Path | None = None, *, existing: Routes 
             else:
                 top = Counter(reasons).most_common(2)
                 result.skipped.append(f"{f.ref}-{p.number} {p.net}: " + "; ".join(f"{r_} x{n_}" for r_, n_ in top))
+                if NO_PLANE in reasons:
+                    result.rejected.append(f"{f.ref}-{p.number} {p.net}: {NO_PLANE} at any clear spot ({reasons.count(NO_PLANE)} candidates: a cut-out or another net's zone)")
     out.nets = {s.net for s in out.segments}
     return result

@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .. import jobs
 from ..config import settings
 from ..errors import LayerError
 from .ses import Routes, parse_ses
@@ -81,11 +82,14 @@ def run(dsn: Path, ses: Path, *, max_passes: int = 30, improvement_threshold: fl
     if ses.exists():
         ses.unlink()
     t0 = time.time()
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, cwd=str(dsn.parent))
-    except subprocess.TimeoutExpired as ex:
-        raise LayerError(ROUTER_FAILED, f"FreeRouting did not finish within {timeout_s:.0f} s", hint="Lower max_passes or route fewer nets at a time.") from ex
+    # streamed, so a background job (kicad_layer.jobs) shows the passes; on timeout FreeRouting is asked to stop
+    # (it has no save-and-stop command headless) and a session it wrote before that is still used
+    proc = jobs.run_process(cmd, timeout_s=timeout_s, cwd=dsn.parent)
+    if proc.timed_out and not ses.exists():
+        raise LayerError(ROUTER_FAILED, f"FreeRouting did not finish within {timeout_s:.0f} s", hint="Lower max_passes or route fewer nets at a time.")
     tail = "\n".join((proc.stdout + "\n" + proc.stderr).strip().splitlines()[-25:])
+    if proc.timed_out:
+        tail += f"\nstopped at the {timeout_s:.0f} s timeout; the session is the one FreeRouting had written"
     if not ses.exists():
         raise LayerError(ROUTER_FAILED, f"FreeRouting exited with {proc.returncode} and wrote no session file", hint=tail[-800:] or "no output")
     routes = parse_ses(ses)

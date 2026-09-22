@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -20,8 +21,9 @@ from typing import Any, Literal
 from kicad_layer.cli import runner
 from kicad_layer.cli.discovery import find_kicad_cli
 from kicad_layer.config import settings
-from kicad_layer.models import Finding, FindingItem, VerdictReport
+from kicad_layer.models import Finding, FindingItem, FindingsSummary, UnconnectedPair, VerdictReport, WorstFinding
 from kicad_layer.paths import display
+from kicad_layer.project import board_rule_warnings
 
 Severity = Literal["default", "all", "error", "warning"]
 
@@ -32,7 +34,8 @@ _SEVERITY_FLAGS: dict[str, list[str]] = {
     "warning": ["--severity-warning"],
 }
 
-MAX_FINDINGS = 400
+MAX_FINDINGS = 200  # a big board's full list runs to hundreds of KB, more than an MCP client takes
+SUMMARY_TOP = 20
 
 
 def finding_id(rule: str, first_uuid: str | None, description: str) -> str:
@@ -130,6 +133,62 @@ def summarize(findings: list[Finding]) -> tuple[str, dict[str, int]]:
     return verdict, counts
 
 
+_MEASURE_RE = re.compile(r"(?P<kw>\w+)?\s*(?P<req>-?\d+(?:\.\d+)?)\s*mm;\s*actual\s*(?P<act>-?\d+(?:\.\d+)?)\s*mm", re.IGNORECASE)
+
+
+def rule_of(description: str) -> str | None:
+    """The constraint a DRC description names: rule:<name>, netclass:<name>, or board for board setup."""
+    m = re.search(r"\b(rule|netclass) '([^']+)'", description)
+    if m:
+        return f"{m.group(1)}:{m.group(2)}"
+    if re.search(r"\(board (?:setup|minimum)", description):
+        return "board"
+    return None
+
+
+def measure(description: str) -> tuple[float | None, float | None, float | None]:
+    """(required, actual, deficit) from '... 0.3000 mm; actual 0.2000 mm'; deficit > 0 means the rule is missed.
+
+    A maximum constraint ('max 1.0 mm; actual 1.2 mm') misses by actual - required, every other one by
+    required - actual."""
+    m = _MEASURE_RE.search(description)
+    if not m:
+        return None, None, None
+    req, act = float(m.group("req")), float(m.group("act"))
+    head = description[: m.start("req")].lower()
+    is_max = bool(re.search(r"\bmax(?:imum)?\b[^;(]*$", head))
+    return req, act, round((act - req) if is_max else (req - act), 4)
+
+
+def summarize_findings(findings: list[Finding], top: int = SUMMARY_TOP) -> FindingsSummary:
+    """Counts per type, rule and severity, the worst ``top`` violations and up to ``top`` unconnected pairs."""
+    active = [f for f in findings if not f.excluded]
+    by_type: dict[str, int] = {}
+    by_rule: dict[str, int] = {}
+    by_severity: dict[str, int] = {}
+    ranked: list[tuple[int, float, int, int, WorstFinding]] = []
+    for i, f in enumerate(active):
+        by_type[f.type] = by_type.get(f.type, 0) + 1
+        by_severity[f.severity] = by_severity.get(f.severity, 0) + 1
+        rule = rule_of(f.description)
+        if rule:
+            by_rule[rule] = by_rule.get(rule, 0) + 1
+        if f.category == "unconnected":
+            continue
+        req, act, deficit = measure(f.description)
+        first = f.items[0] if f.items else None
+        wf = WorstFinding(id=f.id, type=f.type, severity=f.severity, rule=rule, description=f.description, required_mm=req, actual_mm=act,
+                          deficit_mm=deficit, items=[it.description for it in f.items],
+                          x_mm=first.x_mm if first else None, y_mm=first.y_mm if first else None)
+        ranked.append((0 if deficit is not None else 1, -(deficit or 0.0), 0 if f.severity == "error" else 1, i, wf))
+    ranked.sort(key=lambda t: t[:4])
+    unconnected = [f for f in active if f.category == "unconnected"]
+    pairs = [UnconnectedPair(a=f.items[0].description if f.items else f.description, b=f.items[1].description if len(f.items) > 1 else None,
+                             x_mm=f.items[0].x_mm if f.items else None, y_mm=f.items[0].y_mm if f.items else None) for f in unconnected[:top]]
+    return FindingsSummary(by_type=dict(sorted(by_type.items(), key=lambda kv: -kv[1])), by_rule=dict(sorted(by_rule.items(), key=lambda kv: -kv[1])),
+                           by_severity=by_severity, worst=[t[4] for t in ranked[:top]], unconnected=len(unconnected), unconnected_pairs=pairs)
+
+
 def _report_path(kind: str, source: Path) -> Path:
     reports = settings().cache_dir / "reports"
     reports.mkdir(parents=True, exist_ok=True)
@@ -150,6 +209,9 @@ def _build(
     result: runner.CliResult,
     report_path: Path,
     parse,
+    *,
+    summary: bool = False,
+    top: int = SUMMARY_TOP,
 ) -> VerdictReport:
     notes: list[str] = []
     if result.returncode not in (runner.EXIT_OK, runner.EXIT_VIOLATIONS):
@@ -181,9 +243,19 @@ def _build(
     findings, parse_notes = parse(data)
     notes.extend(parse_notes)
     verdict, counts = summarize(findings)
-    truncated = len(findings) > MAX_FINDINGS
-    if truncated:
-        notes.append(f"Only the first {MAX_FINDINGS} of {len(findings)} findings are listed; the full report is at {report_path}.")
+    digest = None
+    if summary:
+        digest = summarize_findings(findings, top)
+        truncated = bool(findings)
+        listed: list[Finding] = []
+        if findings:
+            notes.append(f"Summary of {len(findings)} findings; the full list is in the JSON report at {report_path}.")
+    else:
+        truncated = len(findings) > MAX_FINDINGS
+        listed = findings[:MAX_FINDINGS]
+        if truncated:
+            notes.append(f"Only the first {MAX_FINDINGS} of {len(findings)} findings are listed; the full report is at {report_path}. "
+                         "Call again with summary=true for counts per type and rule and the worst violations.")
     return VerdictReport(
         verdict=verdict,  # type: ignore[arg-type]
         kind=kind,  # type: ignore[arg-type]
@@ -192,8 +264,9 @@ def _build(
         kicad_version=data.get("kicad_version"),
         date=data.get("date"),
         counts=counts,
-        findings=findings[:MAX_FINDINGS],
+        findings=listed,
         truncated=truncated,
+        summary=digest,
         command=result.command,
         exit_code=result.returncode,
         duration_s=result.duration_s,
@@ -201,7 +274,7 @@ def _build(
     )
 
 
-def run_erc(root_schematic: Path, *, severity: Severity = "all") -> VerdictReport:
+def run_erc(root_schematic: Path, *, severity: Severity = "all", summary: bool = False, top: int = SUMMARY_TOP) -> VerdictReport:
     cli = find_kicad_cli()
     report_path = _report_path("erc", root_schematic)
     report_path.unlink(missing_ok=True)
@@ -215,7 +288,7 @@ def run_erc(root_schematic: Path, *, severity: Severity = "all") -> VerdictRepor
         root_schematic,
     ]
     result = runner.run(cmd, timeout_s=settings().cli_long_timeout_s, cwd=root_schematic.parent)
-    return _build("erc", root_schematic, result, report_path, parse_erc)
+    return _build("erc", root_schematic, result, report_path, parse_erc, summary=summary, top=top)
 
 
 def run_drc(
@@ -224,6 +297,8 @@ def run_drc(
     severity: Severity = "all",
     schematic_parity: bool = True,
     all_track_errors: bool = False,
+    summary: bool = False,
+    top: int = SUMMARY_TOP,
 ) -> VerdictReport:
     cli = find_kicad_cli()
     report_path = _report_path("drc", board)
@@ -242,7 +317,8 @@ def run_drc(
     cmd += ["-o", report_path, board]
     started = time.monotonic()
     result = runner.run(cmd, timeout_s=settings().cli_long_timeout_s, cwd=board.parent)
-    report = _build("drc", board, result, report_path, parse_drc)
+    report = _build("drc", board, result, report_path, parse_drc, summary=summary, top=top)
+    report.warnings = board_rule_warnings(board)
     if report.duration_s is None:
         report.duration_s = round(time.monotonic() - started, 3)
     return report

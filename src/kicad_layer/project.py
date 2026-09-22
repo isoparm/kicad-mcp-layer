@@ -67,3 +67,31 @@ def open_project(path: str) -> ProjectInfo:
         lock_files=locks,
         warnings=warnings,
     )
+
+
+NO_PROJECT_RULES = "no project file next to the board: KiCad used default design rules"
+
+
+def board_rule_warnings(board: Path) -> list[str]:
+    """What kicad-cli will miss of the board's design rules, as warnings.
+
+    kicad-cli (DRC, zone refill) takes the net classes and constraints from ``<board>.kicad_pro`` and the
+    custom rules from ``<board>.kicad_dru``, both found by the board's own name and nothing else. A board
+    copied or renamed without them is checked and filled against KiCad's defaults, silently. A
+    ``.kicad_dru`` under another name in the same folder is the copy-with-rename mistake: its rules
+    exist and are not applied."""
+    warnings: list[str] = []
+    folder = board.parent
+    pro = board.with_suffix(".kicad_pro")
+    if not pro.is_file():
+        others = sorted(p.name for p in folder.glob("*.kicad_pro"))
+        msg = f"{NO_PROJECT_RULES} (expected {pro.name})"
+        if others:
+            msg += f"; {', '.join(others)} is ignored because KiCad reads only the project named after the board"
+        warnings.append(msg)
+    dru = board.with_suffix(".kicad_dru")
+    if not dru.is_file():
+        strays = sorted(p.name for p in folder.glob("*.kicad_dru"))
+        if strays:
+            warnings.append(f"custom rules {', '.join(strays)} not applied: KiCad reads only {dru.name}, the rules file named after the board")
+    return warnings

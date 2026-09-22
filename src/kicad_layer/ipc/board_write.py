@@ -64,7 +64,7 @@ def _commit(session: Session, board, message: str, fn):
         board.push_commit(commit, message)
         return result
 
-    return session.call(work)
+    return session.call(work, label=f"commit: {message}")
 
 
 def _fp_row(fp) -> dict[str, Any]:
@@ -292,6 +292,49 @@ def move_footprint(board_path: Path | None, ref: str, at: Point | None = None, r
         _commit(session, board, f"kicad-mcp-layer: flip {ref}", lambda: board.flip_items(find_footprint(board, ref)))
     after = _fp_row(session.call(lambda: find_footprint(board, ref)))
     return {"board": path, "items": [after], "before": before}
+
+
+def move_footprints(board_path: Path | None, moves: list[tuple[str, Point | None, float | None, str | None]]) -> dict[str, Any]:
+    """Every move and flip in one commit, so the batch is one undo step and one round of redraws."""
+    from kipy.geometry import Angle
+
+    session = get_session()
+    board, path = session.board(board_path)
+
+    def lookup():
+        by_ref = {fp.reference_field.text.value: fp for fp in board.get_footprints()}
+        missing = [m[0] for m in moves if m[0] not in by_ref]
+        if missing:
+            raise LayerError(NOT_FOUND_IN_DESIGN, f"No footprint {', '.join(missing)} on the open board; nothing was moved.")
+        return by_ref
+
+    before = {ref: _fp_row(fp) for ref, fp in session.call(lookup).items() if ref in {m[0] for m in moves}}
+
+    def change():
+        by_ref = lookup()
+        targets = []
+        for ref, at, rotation, _ in moves:
+            t = by_ref[ref]
+            if at is not None:
+                t.position = _vec(*at)
+            if rotation is not None:
+                t.orientation = Angle.from_degrees(rotation)
+            targets.append(t)
+        updated = board.update_items(targets)
+        if len(updated) != len(targets):
+            raise LayerError(IPC_REJECTED, f"KiCad accepted {len(updated)} of {len(targets)} footprint updates; the commit was dropped.")
+        flips = [by_ref[ref] for ref, _, _, side in moves if side is not None and side != before[ref]["layer"]]
+        if flips:
+            board.flip_items(flips)
+        return updated
+
+    _commit(session, board, f"kicad-mcp-layer: move {len(moves)} footprints", change)
+    after = session.call(lookup)
+    rows = [_fp_row(after[ref]) for ref, *_ in moves]
+    report = [{"ref": r["ref"], "status": "moved" if any(r[k] != before[r["ref"]][k] for k in ("x_mm", "y_mm", "rotation_deg", "layer")) else "unchanged",
+               "before": {k: before[r["ref"]][k] for k in ("x_mm", "y_mm", "rotation_deg", "layer")}, "after": {k: r[k] for k in ("x_mm", "y_mm", "rotation_deg", "layer")}}
+              for r in rows]
+    return {"board": path, "items": rows, "moves": report}
 
 
 def add_track(board_path: Path | None, points: list[Point], *, width: float, layer: str, net: str) -> dict[str, Any]:
