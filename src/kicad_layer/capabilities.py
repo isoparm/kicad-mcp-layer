@@ -78,7 +78,7 @@ ROWS: list[CapabilityRow] = [
     R(capability="Stack-up presets with published impedance geometries", channel="builtin", status="covered", tool="stackup_info"),
     R(capability="JLCPCB assembly catalogue search: LCSC code, stock, basic part, price", channel="builtin", status="covered", tool="parts_search"),
     R(capability="Run a long tool (autoroute, DRC, ERC, zone refill, render, board review) in the background past the client's request timeout", channel="builtin", status="covered", tool="job_start",
-      notes="State in memory and in <cache>/jobs; a job running when the server restarted is reported lost."),
+      notes="A detached worker process per job, state and result in <cache>/jobs/<id>; a server restart does not stop or lose it."),
     R(capability="State, elapsed time, output tail and FreeRouting pass/unrouted/violations of a background job", channel="builtin", status="covered", tool="job_status"),
     R(capability="The normal result of a finished background job", channel="builtin", status="covered", tool="job_result"),
     R(capability="Search the internet for documentation", channel="builtin", status="gap", notes="Discovery uses the client's web search; the layer takes over from the URL."),

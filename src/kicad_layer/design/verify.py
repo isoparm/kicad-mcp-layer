@@ -19,7 +19,7 @@ from kicad_layer.sch_writer import SchematicBuilder
 
 from . import netcompare
 from .circuit import Circuit
-from .module_sheet import ModuleSheet, build_module_sheet
+from .module_sheet import ModuleSheet, build_module_sheet, pin_roles
 from .render import Layout, render
 
 Groups = set[frozenset[tuple[str, str]]]
@@ -32,11 +32,11 @@ def circuit_groups(c: Circuit) -> Groups:
 def module_groups(m: ModuleSheet) -> Groups:
     """What a module sheet connects: each power group with its capacitors' first pins, every ground pin with the second pins."""
     pins_of = {ref: load_symbol(*part.symbol).pins for ref, part, *_ in m.parts}
+    roles = pin_roles(m, pins_of)
     by_net: dict[str, set[tuple[str, str]]] = {}
-    gnd = {(ref, p.number) for ref, pins in pins_of.items() for p in pins if p.name.startswith(m.gnd_prefix)}
-    for grp in m.power:
-        owner = next(ref for ref, pins in pins_of.items() if all(any(p.number == n for p in pins) for n in grp.pins))
-        by_net.setdefault(grp.net, set()).update({(owner, n) for n in grp.pins} | {(cap, "1") for cap, _ in grp.caps})
+    gnd = set(roles.ground)
+    for grp, owner, ns in roles.groups:
+        by_net.setdefault(grp.net, set()).update({(owner, n) for n in ns} | {(cap, "1") for cap, _ in grp.caps})
         gnd |= {(cap, "2") for cap, _ in grp.caps}
     groups = {frozenset(s) for s in by_net.values()} | {frozenset(gnd)}
     return {g for g in groups if len(g) > 1}

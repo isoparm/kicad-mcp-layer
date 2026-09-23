@@ -2,9 +2,12 @@
 
 Root layout: the module sheet in the middle, consumer sheets on its left and right. Every
 consumer sheet's pins sit on the side facing the module sheet at the same rows as the matching
-module pins, so every root wire is a straight horizontal line. A sheet the project has no
-builder for gets a placeholder: a pin header carrying its signals, so ERC is clean and the
-board shows where the block's connections land.
+module pins, so every root wire is a straight horizontal line. A signal between two consumer
+sheets (``Signal.to``) gets a short stub and a net label at each sheet pin instead: labels of one
+name on the root are one net, wherever the sheets sit. A project without a module sheet
+(``RootLayout.module_sheet = None``) has only such signals, and its sheets stand in the same two
+columns. A sheet the project has no builder for gets a placeholder: a pin header carrying its
+signals, so ERC is clean and the board shows where the block's connections land.
 """
 from __future__ import annotations
 
@@ -29,10 +32,26 @@ def _rows(project: Project, names: list[str]) -> tuple[dict[str, tuple[int, list
     return rows, row - GAP_ROWS
 
 
+def _check_ends(project: Project, names: list[str]) -> None:
+    """Every sheet-to-sheet signal has both ends on the root; no module signal without a module sheet."""
+    L = project.root
+    for s in project.signals:
+        if s.on_module:
+            if L.module_sheet is None and s.sheet in names:
+                raise ValueError(f"signal {s.name}: on module pin {s.pin}, but the root has no module sheet (for a signal between two sheets, pin='' and to=<sheet>)")
+        elif (s.sheet in names) != (s.to in names):
+            missing = s.to if s.sheet in names else s.sheet
+            raise ValueError(f"signal {s.name}: sheet {missing} is not on the root (left_sheets or right_sheets)")
+
+
 def build_root(project: Project) -> tuple[SchematicBuilder, dict[str, SchematicBuilder]]:
     L = project.root
+    unknown = sorted(set(L.papers) - {L.module_sheet, *L.left_sheets, *L.right_sheets})
+    if unknown:
+        raise ValueError(f"RootLayout.papers names sheets the root does not hold: {', '.join(unknown)}")
     root = SchematicBuilder(project.name, ids=IdFactory(scope=project.name), paper=L.paper, title=project.title, date=project.date, rev=project.rev,
                             company=project.company, comments=list(L.comments))
+    _check_ends(project, L.left_sheets + L.right_sheets)
     left, left_rows = _rows(project, L.left_sheets)
     right, right_rows = _rows(project, L.right_sheets)
     total_rows = max(left_rows, right_rows)
@@ -41,13 +60,17 @@ def build_root(project: Project) -> tuple[SchematicBuilder, dict[str, SchematicB
         pins: list[tuple[str, str]] = [("", "passive")] * n_rows
         for start, sigs in rows.values():
             for i, s in enumerate(sigs):
-                pins[start - 1 + i] = (s.name, s.cm5_shape)
+                if s.on_module:  # a sheet-to-sheet signal's row stays blank on the module
+                    pins[start - 1 + i] = (s.name, s.cm5_shape)
         return pins
 
-    module = root.sheet(L.module_sheet, f"{L.module_sheet}.kicad_sch", L.module_at, (L.sheet_w, g((total_rows + 1) * L.pitch)),
-                        pins_left=module_side(left, total_rows), pins_right=module_side(right, total_rows))
+    placed: dict[str, PlacedSheet] = {}
+    module = None
+    if L.module_sheet is not None:
+        module = root.sheet(L.module_sheet, f"{L.module_sheet}.kicad_sch", L.module_at, (L.sheet_w, g((total_rows + 1) * L.pitch)),
+                            pins_left=module_side(left, total_rows), pins_right=module_side(right, total_rows))
+        placed[L.module_sheet] = module
     children: dict[str, SchematicBuilder] = {}
-    placed: dict[str, PlacedSheet] = {L.module_sheet: module}
     for names, rows, x, facing_right in ((L.left_sheets, left, L.left_x, True), (L.right_sheets, right, L.right_x, False)):
         for n in names:
             start, sigs = rows[n]
@@ -57,19 +80,27 @@ def build_root(project: Project) -> tuple[SchematicBuilder, dict[str, SchematicB
                             pins_right=pins if facing_right else None, pins_left=None if facing_right else pins)
             placed[n] = sh
             for s in sigs:
-                a, b = sh.pin(s.name), module.pin(s.name)
+                a = sh.pin(s.name)
+                if not s.on_module:
+                    # a signal between two sheets: a stub away from the sheet and a net label, which the other end's label joins
+                    end = (g(a[0] + (2 * L.pitch if facing_right else -2 * L.pitch)), a[1])
+                    root.wire(a, end)
+                    root.label(s.name, end, rot=0 if facing_right else 180)
+                    continue
+                b = module.pin(s.name)
                 assert abs(a[1] - b[1]) < 1e-6, (s.name, a, b)
                 root.wire(a, b)
     if L.extras is not None:
         L.extras(root)
     builders = project.sheets()
-    module_sch = root.child(module, paper=L.paper, title=f"{L.module_sheet} module", date=project.date, rev=project.rev, company=project.company)
-    children[L.module_sheet] = module_sch
+    if module is not None:
+        module_sch = root.child(module, paper=L.papers.get(L.module_sheet, L.paper), title=f"{L.module_sheet} module", date=project.date, rev=project.rev, company=project.company)
+        children[L.module_sheet] = module_sch
     for n in L.left_sheets + L.right_sheets:
         if n in builders:
-            children[n] = root.child(placed[n], paper=L.paper, title=n, date=project.date, rev=project.rev, company=project.company)
+            children[n] = root.child(placed[n], paper=L.papers.get(n, L.paper), title=n, date=project.date, rev=project.rev, company=project.company)
             continue
-        cb = root.child(placed[n], paper="A4", title=f"{n} (placeholder)", date=project.date, rev=project.rev, company=project.company)
+        cb = root.child(placed[n], paper=L.papers.get(n, "A4"), title=f"{n} (placeholder)", date=project.date, rev=project.rev, company=project.company)
         _placeholder(cb, n, by_sheet(project.signals, n))
         children[n] = cb
     return root, children

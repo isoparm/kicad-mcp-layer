@@ -7,8 +7,9 @@ up to three millimetres; a via next to the start and the same shapes on the othe
 via at each end when the far end is a track on the other layer); and last a grid search on a
 quarter-millimetre lattice inside the connection's neighbourhood, straightened afterwards. A pad on
 a plane net gets a via beside it. Every candidate is judged by ``copper.Model``, so the result keeps
-the project's clearances by construction; the build re-runs DRC anyway. Differential pairs are left
-to the pair router.
+the project's clearances by construction, custom ``.kicad_dru`` clearances included, and no via or
+track goes on a net a ``disallow`` rule names; the build re-runs DRC anyway. Differential pairs are
+left to the pair router.
 
     python -m kicad_layer.design.stubs <build-dir or .kicad_pcb> [--dry-run]
 
@@ -123,7 +124,10 @@ def _on_layer(model: copper.Model, net: str, layer: str, a, b, width: float) -> 
 # ---------------------------------------------------------------- vias
 def _via_spots(model: copper.Model, net: str, p: tuple[float, float], from_layer: str, width: float, size: float, drill: float,
                radii=(0.6, 0.8, 1.0, 1.3, 1.6, 2.0, 2.5)) -> list[tuple[float, float]]:
-    """Places for a via reachable from ``p`` on ``from_layer`` by a clear stub, nearest first; never inside the pad itself."""
+    """Places for a via reachable from ``p`` on ``from_layer`` by a clear stub, nearest first; never inside the pad itself,
+    and none on a net a ``.kicad_dru`` rule forbids vias on."""
+    if model.rules.disallowed("via", net):
+        return []
     out = []
     for r in radii:
         angles = [math.radians(k * 45) for k in range(8)]
@@ -389,6 +393,11 @@ def route_stubs(bm: BoardModel, rules: copper.Rules, opens: list[Open], pcb: Pat
             res.skipped += 1
             res.lines.append(f"skipped {o.net}: a differential pair line, for the pair router")
             continue
+        why = rules.disallowed("track", o.net)
+        if why:
+            res.skipped += 1
+            res.lines.append(f"skipped {o.net}: {why}")
+            continue
         width = rules.track(o.net)
         size, drill = rules.via(o.net)
         t0 = time.perf_counter()
@@ -396,7 +405,9 @@ def route_stubs(bm: BoardModel, rules: copper.Rules, opens: list[Open], pcb: Pat
         dt = time.perf_counter() - t0
         if stub is None:
             res.failed += 1
-            res.lines.append(f"FAILED {o.net} ({o.a[0]:.2f},{o.a[1]:.2f}) to ({o.b[0]:.2f},{o.b[1]:.2f}): {_blockers(model, o, width)}")
+            no_via = rules.disallowed("via", o.net)
+            res.lines.append(f"FAILED {o.net} ({o.a[0]:.2f},{o.a[1]:.2f}) to ({o.b[0]:.2f},{o.b[1]:.2f}): {_blockers(model, o, width)}"
+                             + (f"; no via tried: {no_via}" if no_via else ""))
             continue
         for layer, p, q in stub.segments:
             out.segments.append(RouteSegment(o.net, layer, width, p[0], p[1], q[0], q[1]))

@@ -18,12 +18,18 @@ from .signals import Signal
 
 SheetBuilder = Callable[[SchematicBuilder], None]
 
+# The .kicad_pro a Rules builds on when it names none: the settings KiCad 10.0.6 writes (taken from the
+# pic_programmer demo's project file, upgraded by KiCad), with the demo's sheets, net classes, patterns and
+# paths emptied and the silkscreen checks (silk_overlap, silk_over_copper) at warning instead of error.
+DEFAULT_TEMPLATE = Path(__file__).resolve().parent / "templates" / "default.kicad_pro"
+SEVERITIES = ("error", "warning", "ignore")
+
 
 @dataclass
 class Rules:
     """What goes into the .kicad_pro and the .kicad_dru: built on a KiCad-authored project file so every section exists."""
 
-    template: Path
+    template: Path | None  # a KiCad-authored .kicad_pro to build on; None: the package's DEFAULT_TEMPLATE
     rules: dict
     classes: list[dict]
     assignments: list[dict]  # KiCad 10 netclass_patterns: [{"netclass": ..., "pattern": ...}]
@@ -31,21 +37,25 @@ class Rules:
     via_dimensions: list[dict]
     diff_pair_dimensions: list[dict]
     design_rules: str = ""  # the .kicad_dru text, if any
+    rule_severities: dict[str, str] = field(default_factory=dict)  # DRC check -> error | warning | ignore, over the template's
 
 
 @dataclass
 class RootLayout:
-    """The root sheet: the module sheet in the middle, consumer sheets facing it, one straight wire per signal."""
+    """The root sheet: the module sheet in the middle, consumer sheets facing it, one straight wire per module signal;
+    a net label at both ends of a signal between two consumer sheets. ``module_sheet=None``: a board without a module,
+    whose sheets share only sheet-to-sheet signals. ``module_at`` places the module sheet; its y is where the columns start."""
 
-    module_sheet: str
-    left_sheets: list[str]
-    right_sheets: list[str]
+    module_sheet: str | None = None
+    left_sheets: list[str] = field(default_factory=list)
+    right_sheets: list[str] = field(default_factory=list)
     module_at: tuple[float, float] = (152.4, 25.4)
     sheet_w: float = 50.8
     left_x: float = 63.5
     right_x: float = 254.0
     pitch: float = 2.54
-    paper: str = "A3"
+    paper: str = "A3"  # the root's paper, and every sheet's unless ``papers`` names it
+    papers: dict[str, str] = field(default_factory=dict)  # sheet name -> its own paper ("A4", "A3", "A2" ...); a placeholder sheet defaults to A4
     comments: list[str] = field(default_factory=list)
     extras: Callable[[SchematicBuilder], None] | None = None  # anything else on the root (mounting holes, notes)
 
@@ -105,7 +115,10 @@ class Project:
 def write_project_file(project: Project, path: Path, sheets: list[list[str]]) -> None:
     """The .kicad_pro from the template, with the project's rules, classes and sheet list, and its .kicad_dru."""
     r = project.rules
-    pro = json.loads(r.template.read_text(encoding="utf-8"))
+    bad = {k: v for k, v in r.rule_severities.items() if v not in SEVERITIES}
+    if bad:
+        raise ValueError(f"rule_severities: {bad}; a severity is one of {', '.join(SEVERITIES)}")
+    pro = json.loads((r.template or DEFAULT_TEMPLATE).read_text(encoding="utf-8"))
     pro["meta"] = {"filename": f"{project.name}.kicad_pro", "version": 3}
     pro["sheets"] = sheets
     pro["text_variables"] = {}
@@ -115,6 +128,7 @@ def write_project_file(project: Project, path: Path, sheets: list[list[str]]) ->
     ds = pro["board"]["design_settings"]
     ds["rules"] = {**ds.get("rules", {}), **r.rules}
     ds["drc_exclusions"] = []
+    ds["rule_severities"] = {**ds.get("rule_severities", {}), **r.rule_severities}
     ds["track_widths"] = list(r.track_widths)
     ds["via_dimensions"] = list(r.via_dimensions)
     ds["diff_pair_dimensions"] = list(r.diff_pair_dimensions)
@@ -131,6 +145,8 @@ def write_project_file(project: Project, path: Path, sheets: list[list[str]]) ->
     pro["net_settings"]["netclass_patterns"] = list(r.assignments)
     pro["net_settings"]["netclass_assignments"] = None
     pro["erc"]["erc_exclusions"] = []
+    if sheets and "schematic" in pro:  # the template's own root would otherwise stay the project's top-level sheet
+        pro["schematic"]["top_level_sheets"] = [{"filename": f"{project.name}.kicad_sch", "name": project.name, "uuid": sheets[0][0]}]
     path.write_text(json.dumps(pro, indent=2), encoding="utf-8", newline='\n')
     if r.design_rules:
         path.with_suffix(".kicad_dru").write_text(r.design_rules, encoding="utf-8", newline='\n')

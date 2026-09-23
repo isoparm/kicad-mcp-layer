@@ -66,6 +66,7 @@ def export_fab(
     step: bool = False,
     pdf: bool = False,
     layers: list[str] | None = None,
+    exclude_dnp: bool = False,
 ) -> ExportResult:
     cli = find_kicad_cli()
     out = _output_dir(board.parent, output_dir, "fab")
@@ -98,7 +99,8 @@ def export_fab(
     else:
         skipped.append("drill")
     if position:
-        run([cli.path, "pcb", "export", cli.pcb_export_verb("pos", "positions"), "-o", out / f"{board.stem}-pos.csv", "--format", "csv", "--units", "mm", "--side", "both", board], "Position")
+        dnp = ["--exclude-dnp"] if exclude_dnp else []  # footprints carrying KiCad's do-not-populate attribute
+        run([cli.path, "pcb", "export", cli.pcb_export_verb("pos", "positions"), "-o", out / f"{board.stem}-pos.csv", "--format", "csv", "--units", "mm", "--side", "both", *dnp, board], "Position")
     else:
         skipped.append("position")
     if step:
@@ -131,6 +133,7 @@ def export_bom(
     group_by: list[str] | None = None,
     output_path: str | None = None,
     max_rows: int = 500,
+    exclude_dnp: bool = False,
 ) -> BomResult:
     cli = find_kicad_cli()
     if output_path:
@@ -144,6 +147,8 @@ def export_bom(
     cmd: list = [cli.path, "sch", "export", "bom", "--fields", ",".join(use_fields)]
     if use_group:
         cmd += ["--group-by", ",".join(use_group)]
+    if exclude_dnp:
+        cmd.append("--exclude-dnp")  # symbols marked do-not-populate
     cmd += ["--sort-field", "Reference", "-o", csv_path, root_schematic]
     result = runner.run(cmd, timeout_s=settings().cli_long_timeout_s, cwd=root_schematic.parent)
     if not result.ok or not csv_path.is_file():

@@ -218,11 +218,13 @@ class BoardBuilder:
         sheetfile: str = "",
         layer: str = "F.Cu",
         fields: dict[str, str] | None = None,
+        dnp: bool = False,
     ) -> Node:
         """Embed a library footprint. ``path`` is the full symbol path (``/root-uuid/sheet-uuid/symbol-uuid``);
         ``path_uuid`` is the shorthand for a symbol on the root sheet. ``sheetname`` and ``sheetfile``
         name the sheet the symbol lives on, as KiCad records them. ``rot`` is the orientation KiCad shows
-        for the footprint on either side; ``layer`` "B.Cu" mirrors the part the way KiCad's flip does."""
+        for the footprint on either side; ``layer`` "B.Cu" mirrors the part the way KiCad's flip does.
+        ``dnp`` adds KiCad's do-not-populate attribute, as a symbol marked DNP carries it to the board."""
         if layer not in ("F.Cu", "B.Cu"):
             raise ValueError(f"a footprint sits on F.Cu or B.Cu, not {layer!r}")
         back = layer == "B.Cu"
@@ -306,6 +308,11 @@ class BoardBuilder:
         attr = child(src, "attr")
         if attr is not None:
             node.append(copy.deepcopy(attr))
+        if dnp:  # the one attribute that is the board's, not the library's: it follows the symbol's DNP flag
+            if attr is None:
+                node.append(S("attr", Sym("dnp")))
+            elif Sym("dnp") not in node[-1][1:]:
+                node[-1].append(Sym("dnp"))
         node.append(S("duplicate_pad_numbers_are_jumpers", Sym("no")))
 
         for c in src:

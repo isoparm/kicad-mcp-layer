@@ -20,7 +20,7 @@ An MCP server (official `mcp` 2.x SDK, Python 3.12) that drives KiCad 10 through
 ## Layers
 
 * `kicad_layer.design` is the product: a board as data, the KiCad files as build outputs. It may import
-  only the core (`sexpr`, `ids`, `kicad_libs`, `libtables`, `paths`, `config`, `errors`, `models`, `cli/`),
+  only the core (`sexpr`, `ids`, `kicad_libs`, `libtables`, `paths`, `config`, `errors`, `models`, `dru`, `cli/`),
   the two writers and `routes`. `tests/test_layers.py` enforces it.
 * The MCP server is the check-and-view layer. `KICAD_LAYER_TOOLS` picks the tier: `core` (default: checks,
   exports, renders, reviews, libraries, documents, board reads) or `full` (plus design edits and the routers).

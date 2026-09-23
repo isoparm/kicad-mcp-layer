@@ -895,7 +895,7 @@ JobState = Literal["queued", "running", "done", "failed", "lost", "unknown"]
 class JobStatus(BaseModel):
     id: str
     tool: str | None = None
-    state: JobState = Field(description="done: job_result has the result. lost: the server restarted while it ran. unknown: no such job.")
+    state: JobState = Field(description="done: job_result has the result. lost: the process that ran it ended without a result. unknown: no such job.")
     elapsed_s: float | None = None
     progress: dict[str, Any] = Field(default_factory=dict, description="FreeRouting: pass, phase, unrouted, violations from its log.")
     log_tail: list[str] = Field(default_factory=list, description="The last lines of the job's output.")

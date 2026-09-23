@@ -165,6 +165,62 @@ def _custom_pad_bbox(pad) -> tuple[tuple[float, float] | None, tuple[float, floa
     return (min(xs), max(xs)), (min(ys), max(ys))
 
 
+COURTYARD_SHAPES = ("fp_line", "fp_rect", "fp_arc", "fp_poly", "fp_circle")
+
+
+def _arc_extremes(a: tuple[float, float], m: tuple[float, float], b: tuple[float, float]) -> list[tuple[float, float]]:
+    """The points where the arc from ``a`` through ``m`` to ``b`` reaches its circle's leftmost, rightmost, top or bottom."""
+    (ax, ay), (mx, my), (bx, by) = a, m, b
+    d = 2 * (ax * (my - by) + mx * (by - ay) + bx * (ay - my))
+    if abs(d) < 1e-12:
+        return []  # collinear: a straight line, its ends bound it
+    ux = ((ax * ax + ay * ay) * (my - by) + (mx * mx + my * my) * (by - ay) + (bx * bx + by * by) * (ay - my)) / d
+    uy = ((ax * ax + ay * ay) * (bx - mx) + (mx * mx + my * my) * (ax - bx) + (bx * bx + by * by) * (mx - ax)) / d
+    r = math.hypot(ax - ux, ay - uy)
+
+    def ang(x: float, y: float) -> float:
+        return math.atan2(y - uy, x - ux) % (2 * math.pi)
+
+    t0, tm, t1 = ang(ax, ay), ang(mx, my), ang(bx, by)
+    ccw_span = (t1 - t0) % (2 * math.pi)
+    ccw = (tm - t0) % (2 * math.pi) <= ccw_span  # the mid point lies on the counter-clockwise way from a to b
+    out = []
+    for k in range(4):
+        t = k * math.pi / 2
+        off = (t - t0) % (2 * math.pi)
+        if (off <= ccw_span) if ccw else (off >= ccw_span or off == 0.0):
+            out.append((ux + r * math.cos(t), uy + r * math.sin(t)))
+    return out
+
+
+def courtyard_points(g, rot: float = 0.0, ox: float = 0.0, oy: float = 0.0) -> list[tuple[float, float]]:
+    """Points whose bounding box bounds one courtyard graphic of a footprint placed at (ox, oy) turned by ``rot``.
+
+    Lines and rectangles give their ends, polygons their vertices, arcs their ends and the extremes they
+    sweep through, circles their centre plus and minus the radius along the board's axes (exact at any
+    rotation). Both the design package's placement check and ``load_board`` read courtyards through it."""
+    t = tag(g)
+
+    def pt(name: str) -> tuple[float, float] | None:
+        c = child(g, name)
+        return rotate_about(float(c[1]), float(c[2]), rot, ox, oy) if c is not None and len(c) > 2 else None
+
+    if t == "fp_circle":
+        c, e = child(g, "center"), child(g, "end")
+        if c is None or e is None or len(c) < 3 or len(e) < 3:
+            return []
+        r = math.hypot(float(e[1]) - float(c[1]), float(e[2]) - float(c[2]))
+        cx, cy = pt("center")
+        return [(cx - r, cy - r), (cx + r, cy + r)]
+    out = [q for q in (pt("start"), pt("mid"), pt("end")) if q is not None]
+    if t == "fp_arc" and len(out) == 3:
+        out += _arc_extremes(out[0], out[1], out[2])
+    pts = child(g, "pts")
+    if pts is not None:
+        out += [rotate_about(float(xy[1]), float(xy[2]), rot, ox, oy) for xy in children(pts, "xy")]
+    return out
+
+
 def load_board(path: Path) -> BoardModel:
     root = parse(path.read_text(encoding="utf-8", errors="replace"))
     layers_node = child(root, "layers") or []
@@ -242,19 +298,10 @@ def load_board(path: Path) -> BoardModel:
             if not isinstance(g, list):
                 continue
             t = tag(g)
-            if t in ("fp_line", "fp_rect", "fp_arc", "fp_poly") and value(g, "layer") in ("F.CrtYd", "B.CrtYd"):
-                for k in ("start", "end", "mid"):
-                    c = child(g, k)
-                    if c is not None and len(c) > 2:
-                        px, py = rotate_about(float(c[1]), float(c[2]), rot, fx, fy)
-                        cx.append(px)
-                        cy.append(py)
-                pts = child(g, "pts")
-                if pts is not None:
-                    for xy in children(pts, "xy"):
-                        px, py = rotate_about(float(xy[1]), float(xy[2]), rot, fx, fy)
-                        cx.append(px)
-                        cy.append(py)
+            if t in COURTYARD_SHAPES and value(g, "layer") in ("F.CrtYd", "B.CrtYd"):
+                for px, py in courtyard_points(g, rot, fx, fy):
+                    cx.append(px)
+                    cy.append(py)
             if t in ("property", "fp_text") and (value(g, "layer") or "").endswith("SilkS") and child(g, "hide") is None:
                 eff = child(g, "effects")
                 font = child(eff, "font") if eff is not None else None

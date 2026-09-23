@@ -150,9 +150,12 @@ class SchematicBuilder:
         extra_props: dict[str, str] | None = None,
         in_bom: bool | None = None,
         on_board: bool | None = None,
+        dnp: bool = False,
     ) -> Placed:
         """``in_bom`` and ``on_board`` override the library symbol's flags (a mounting-hole symbol
-        excluded from the BOM can stand for a solder nut that must be bought, for instance)."""
+        excluded from the BOM can stand for a solder nut that must be bought, for instance).
+        ``dnp`` marks the symbol do-not-populate, as KiCad's own flag: it stays in the BOM marked DNP,
+        and KiCad's BOM and position exports leave it out when asked to (``--exclude-dnp``)."""
         sym = load_symbol(lib, name)
         self.cache.setdefault(sym.lib_id, sym)
         placed = Placed(symbol=sym, ref=ref, at=at, rot=rot, mirror=mirror, uuid=self.ids.make("symbol", ref, unit), unit=unit)
@@ -177,7 +180,7 @@ class SchematicBuilder:
             S("in_bom", flag("in_bom", in_bom, "yes")),
             S("on_board", flag("on_board", on_board, "yes")),
             S("in_pos_files", Sym(value(sym.tree, "in_pos_files", default="yes") or "yes")),
-            S("dnp", Sym("no")),
+            S("dnp", Sym("yes" if dnp else "no")),
             S("uuid", placed.uuid),
             # KiCad stores a field's angle relative to the symbol's, so a rotated symbol needs 90 here
             # for the text to read horizontally; KiCad's own files keep field angles to 0 or 90.
@@ -201,6 +204,20 @@ class SchematicBuilder:
         self.items.append(node)
         self.placed.append(placed)
         return placed
+
+    def mark_dnp(self, refs: set[str] | list[str] | tuple[str, ...]) -> int:
+        """Mark every placed unit of the references in ``refs`` do-not-populate; returns how many symbols changed."""
+        wanted, n = set(refs), 0
+        for node in self.items:
+            if str(node[0]) != "symbol":
+                continue
+            ref = next((str(c[2]) for c in node if isinstance(c, list) and c and str(c[0]) == "property" and str(c[1]) == "Reference"), None)
+            if ref in wanted:
+                flag = child(node, "dnp")
+                if flag is not None and str(flag[1]) != "yes":
+                    flag[1] = Sym("yes")
+                    n += 1
+        return n
 
     def power(self, name: str, at: Point, *, rot: int = 0) -> Placed:
         """A power symbol (+5V, GND, ...). Its pin is at ``at``."""

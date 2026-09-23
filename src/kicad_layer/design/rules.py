@@ -10,6 +10,10 @@ from pathlib import Path
 
 from .project import Rules
 
+# Silkscreen overlaps are cosmetic on these boards (library footprints overlap their own silk and pads); KiCad's
+# template makes them errors, which fails every generated board's DRC. A project's rule_severities go over these.
+SILK_WARNINGS = {"silk_overlap": "warning", "silk_over_copper": "warning"}
+
 # JLCPCB 4-layer, 1 oz (kicad_layer.fab_limits.JLCPCB_4L_1OZ, checked 2026-09-04); values chosen with margin
 JLCPCB_4L_1OZ = {
     "min_clearance": 0.125, "min_track_width": 0.1, "min_via_diameter": 0.5, "min_through_hole_diameter": 0.25,
@@ -47,11 +51,43 @@ VIA_DIMENSIONS = [{"diameter": 0.0, "drill": 0.0}, {"diameter": 0.6, "drill": 0.
 DIFF_PAIR_DIMENSIONS = [{"gap": 0.0, "via_gap": 0.0, "width": 0.0}, {"gap": 0.15, "via_gap": 0.25, "width": 0.1722}, {"gap": 0.15, "via_gap": 0.25, "width": 0.2332}]
 
 
-def jlcpcb_4l(template: Path, assignments: list[dict], *, design_rules: str = "", classes: list[dict] | None = None) -> Rules:
-    """The JLCPCB four-layer rule set with a project's net-class assignments and custom design rules."""
+def jlcpcb_4l(template: Path | None = None, assignments: list[dict] | None = None, *, design_rules: str = "", classes: list[dict] | None = None,
+              rule_severities: dict[str, str] | None = None) -> Rules:
+    """The JLCPCB four-layer rule set with a project's net-class assignments and custom design rules; no template: the package's."""
     return Rules(template=template, rules=dict(JLCPCB_4L_1OZ), classes=[dict(c) for c in (classes if classes is not None else STANDARD_CLASSES)],
-                 assignments=[dict(a) for a in assignments], track_widths=list(TRACK_WIDTHS), via_dimensions=[dict(v) for v in VIA_DIMENSIONS],
-                 diff_pair_dimensions=[dict(d) for d in DIFF_PAIR_DIMENSIONS], design_rules=design_rules)
+                 assignments=[dict(a) for a in assignments or ()], track_widths=list(TRACK_WIDTHS), via_dimensions=[dict(v) for v in VIA_DIMENSIONS],
+                 diff_pair_dimensions=[dict(d) for d in DIFF_PAIR_DIMENSIONS], design_rules=design_rules,
+                 rule_severities={**SILK_WARNINGS, **(rule_severities or {})})
+
+
+# JLCPCB 2-layer, 1.6 mm, 1 oz: JLCPCB standard capabilities, verify on jlcpcb.com (not re-checked when this set was
+# written; kicad_layer.fab_limits.JLCPCB_2L_1OZ keeps the figures checked 2026-09-04). Track and space: 0.127 mm (5 mil)
+# is the long-standing 2-layer minimum, 0.15 is used for margin. Via 0.6 mm on a 0.3 mm drill (0.15 ring), 0.5 mm hole
+# to hole, 0.3 mm copper to the board edge. Text height and thickness as in the 4-layer set: library footprints draw
+# their fab texts small, a project's own silk keeps to JLCPCB's 1.0 mm / 0.15 mm and the review checks it.
+JLCPCB_2L = {
+    "min_clearance": 0.15, "min_track_width": 0.15, "min_via_diameter": 0.6, "min_through_hole_diameter": 0.3,
+    "min_via_annular_width": 0.15, "min_hole_to_hole": 0.5, "min_hole_clearance": 0.25, "min_copper_edge_clearance": 0.3,
+    "min_silk_clearance": 0.0, "min_text_height": 0.8, "min_text_thickness": 0.15, "min_connection": 0.15, "min_microvia_diameter": 0.2,
+    "min_microvia_drill": 0.1, "min_resolved_spokes": 2, "allow_blind_buried_vias": False, "allow_microvias": False, "max_error": 0.005,
+    "solder_mask_to_copper_clearance": 0.0, "use_height_for_length_calcs": True, "min_groove_width": 0.0,
+}
+# a two-layer board has no controlled-impedance stack-up here: signals and power only
+JLCPCB_2L_CLASSES = [
+    {"name": "Default", "clearance": 0.2, "track_width": 0.25, "via_diameter": 0.6, "via_drill": 0.3, "diff_pair_width": 0.25, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25},
+    {"name": "Power", "clearance": 0.2, "track_width": 0.5, "via_diameter": 0.7, "via_drill": 0.3, "diff_pair_width": 0.5, "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25},
+]
+JLCPCB_2L_TRACK_WIDTHS = [0.0, 0.15, 0.25, 0.4, 0.5, 1.0]
+JLCPCB_2L_DIFF_PAIR_DIMENSIONS = [{"gap": 0.0, "via_gap": 0.0, "width": 0.0}]
+
+
+def jlcpcb_2l(template: Path | None = None, assignments: list[dict] | None = None, *, design_rules: str = "", classes: list[dict] | None = None,
+              rule_severities: dict[str, str] | None = None) -> Rules:
+    """The JLCPCB two-layer 1.6 mm 1 oz rule set with a project's net-class assignments and custom design rules; no template: the package's."""
+    return Rules(template=template, rules=dict(JLCPCB_2L), classes=[dict(c) for c in (classes if classes is not None else JLCPCB_2L_CLASSES)],
+                 assignments=[dict(a) for a in assignments or ()], track_widths=list(JLCPCB_2L_TRACK_WIDTHS), via_dimensions=[dict(v) for v in VIA_DIMENSIONS],
+                 diff_pair_dimensions=[dict(d) for d in JLCPCB_2L_DIFF_PAIR_DIMENSIONS], design_rules=design_rules,
+                 rule_severities={**SILK_WARNINGS, **(rule_severities or {})})
 
 
 # AISLER 4-layer 1.6 mm, 35 um ENIG (kicad_layer.fab_limits.AISLER_4L_35UM, checked 2026-09-08). These are the values AISLER
@@ -109,8 +145,10 @@ def merge_design_rules(*texts: str) -> str:
     return "" if not bodies else "(version 1)\n" + "\n\n".join(bodies) + "\n"
 
 
-def aisler_4l(template: Path, assignments: list[dict], *, design_rules: str = "", classes: list[dict] | None = None) -> Rules:
+def aisler_4l(template: Path | None = None, assignments: list[dict] | None = None, *, design_rules: str = "", classes: list[dict] | None = None,
+              rule_severities: dict[str, str] | None = None) -> Rules:
     """The AISLER four-layer rule set with a project's net-class assignments; AISLER's own custom rules come first in the .kicad_dru."""
     return Rules(template=template, rules=dict(AISLER_4L_35UM), classes=[dict(c) for c in (classes if classes is not None else AISLER_CLASSES)],
-                 assignments=[dict(a) for a in assignments], track_widths=list(AISLER_TRACK_WIDTHS), via_dimensions=[dict(v) for v in VIA_DIMENSIONS],
-                 diff_pair_dimensions=[dict(d) for d in AISLER_DIFF_PAIR_DIMENSIONS], design_rules=merge_design_rules(AISLER_DESIGN_RULES, design_rules))
+                 assignments=[dict(a) for a in assignments or ()], track_widths=list(AISLER_TRACK_WIDTHS), via_dimensions=[dict(v) for v in VIA_DIMENSIONS],
+                 diff_pair_dimensions=[dict(d) for d in AISLER_DIFF_PAIR_DIMENSIONS], design_rules=merge_design_rules(AISLER_DESIGN_RULES, design_rules),
+                 rule_severities={**SILK_WARNINGS, **(rule_severities or {})})

@@ -27,20 +27,32 @@ class Pin:
     number: str
     name: str
     rotation: int  # library pin rotation: 0 leaves the body to the left, 180 to the right, 90 down, 270 up
+    unit: int = 1  # the symbol unit the pin is drawn on (a dual opamp: 1, 2 and 3 for power); 0 is common to every unit
 
     def __str__(self) -> str:
         return f"{self.ref}.{self.number}" + (f" ({self.name})" if self.name else "")
 
 
 class PartInst:
-    """A part with a reference, its pins known from the library symbol."""
+    """A part with a reference, its pins known from the library symbol, each with the unit it is drawn on."""
 
-    def __init__(self, ref: str, part: Part, value_text: str | None = None) -> None:
+    def __init__(self, ref: str, part: Part, value_text: str | None = None, dnp: bool = False) -> None:
         self.ref = ref
         self.part = part
         self.value_text = value_text
+        self.dnp = dnp
         sym = load_symbol(*part.symbol)
-        self.pins = [Pin(ref, p.number, p.name, int(p.rotation)) for p in sym.pins]
+        self.pins = [Pin(ref, p.number, p.name, int(p.rotation), p.unit) for p in sym.pins]
+
+    @property
+    def units(self) -> list[int]:
+        """The symbol units that carry pins, in order: ``[1]`` for a one-unit part, ``[1, 2, 3]`` for a dual opamp with a power unit."""
+        return sorted({p.unit for p in self.pins if p.unit}) or [1]
+
+    def unit_pins(self, unit: int) -> list[Pin]:
+        """The pins drawn on ``unit``; pins common to every unit (unit 0) are drawn on the first."""
+        first = self.units[0]
+        return [p for p in self.pins if p.unit == unit or (p.unit == 0 and unit == first)]
 
     def pin(self, key: str) -> Pin:
         """By number first, then by name (which must then be unique on the part)."""
@@ -83,11 +95,12 @@ class Circuit:
 
     # -- building -------------------------------------------------------------------
 
-    def part(self, ref: str, part: Part, *, value_text: str | None = None) -> PartInst:
-        """Add a catalogue part as reference ``ref``; ``value_text`` overrides the Value shown. Pins: ``inst["3"]`` by number or unique name."""
+    def part(self, ref: str, part: Part, *, value_text: str | None = None, dnp: bool = False) -> PartInst:
+        """Add a catalogue part as reference ``ref``; ``value_text`` overrides the Value shown; ``dnp`` marks it do-not-populate
+        (``(dnp yes)`` on every unit). Pins: ``inst["3"]`` by number or unique name."""
         if ref in self.parts:
             raise ValueError(f"{ref} placed twice")
-        inst = PartInst(ref, part, value_text)
+        inst = PartInst(ref, part, value_text, dnp)
         self.parts[ref] = inst
         return inst
 
@@ -117,7 +130,7 @@ class Circuit:
             self.open.add(inst.pin(n))
 
     def note(self, text: str, size: float = 1.5) -> None:
-        """A free text on the sheet; the renderer places it."""
+        """A free text on the sheet; the renderer stacks the notes under the drawing (or from ``Layout.note_at``)."""
         self.notes.append((text, size))
 
     def _add(self, net: Net) -> Net:

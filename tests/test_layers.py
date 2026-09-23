@@ -16,7 +16,7 @@ SRC = Path(__file__).parent.parent / "src" / "kicad_layer"
 DESIGN_MAY_IMPORT = {
     "kicad_layer", "kicad_layer.sexpr", "kicad_layer.ids", "kicad_layer.kicad_libs", "kicad_layer.libtables",
     "kicad_layer.paths", "kicad_layer.config", "kicad_layer.errors", "kicad_layer.models", "kicad_layer.formats",
-    "kicad_layer.cli", "kicad_layer.sch_writer", "kicad_layer.pcb_writer", "kicad_layer.routes", "kicad_layer.review",
+    "kicad_layer.cli", "kicad_layer.sch_writer", "kicad_layer.pcb_writer", "kicad_layer.routes", "kicad_layer.review", "kicad_layer.dru",
 }
 ROUTERS_IMPORTED_BY = {"kicad_layer.tools"}
 

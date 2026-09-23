@@ -310,8 +310,9 @@ first and the result says what it decided:
   have a zone (a pour, not a track). `force_nets` routes a net anyway. An excluded net stays in the DSN
   with its pins and copper, protected, in a class `<class>_excluded` that goes to FreeRouting's ignore
   list (`-inc`), so class clearances still apply to it; the filled pour of an excluded net is a keep-out,
-  an unfilled one only an outline (refill first). FreeRouting before 2.4 applies `-inc` only in its GUI,
-  so whatever it draws on an excluded net headless is dropped from the session (`dropped_segments`).
+  an unfilled one only an outline (refill first). FreeRouting headless (2.4.1 included) may route an
+  excluded net anyway; whatever it draws on one is always dropped from the session (`dropped_segments`,
+  and a warning naming the nets).
   `excluded_nets` gives each net with its reason: route those by hand and check with `run_drc`.
 
 ## Background jobs
@@ -319,7 +320,7 @@ first and the result says what it decided:
 An MCP client gives a tool call about a minute. FreeRouting on a real board, DRC or a zone refill on a
 couple of hundred parts, and a high-quality render take longer: the client gives up while the work goes
 on unseen. `job_start` runs one of those tools (`autoroute`, `run_drc`, `run_erc`, `pcb_refill_zones`,
-`render_board`, `review_board`) in a thread of the server with the arguments a direct call takes, checked
+`render_board`, `review_board`) in a worker process of its own with the arguments a direct call takes, checked
 the same way, and answers at once with a job id. The tool must be in this server's tier (`autoroute` and
 `pcb_refill_zones` need `full`) and keeps its own rules (`pcb_refill_zones` still needs write mode).
 `job_status` gives the state (`queued`, `running`, `done`, `failed`), the seconds so far, the last lines of
@@ -329,9 +330,16 @@ before answering, which saves polls. `job_result` returns the tool's normal resu
 for `render_board` the text with the PNG path, to be read as an image) or, for a failed job, raises the
 tool's error with its code (`JOB_FAILED` when it had none).
 
-A call returning never stops the work, and a subprocess is never killed for it. Jobs live in memory and in
-one JSON file each under `<cache>/jobs`; after a server restart a finished job still gives its result, a
-job that was running is `lost`, an id never seen is `unknown`. FreeRouting has no save-and-stop command
+A call returning never stops the work, and a subprocess is never killed for it. The worker is detached
+(`python -m kicad_layer.jobs worker <dir>`: its own session on POSIX; on Windows a new process group with a
+hidden console, out of the host's job object when the host allows it), so an MCP host that reconnects and
+restarts the server does not stop the job, and it still runs the tool's post-processing (for `autoroute`,
+reading the session and writing the routes JSON). Everything about a job is in `<cache>/jobs/<id>/`:
+`status.json` (state, worker pid, heartbeat, progress, error), `log.txt` and `result.json`. Any server
+process reads those, so `job_status` and `job_result` answer for a job an earlier server started. A job
+whose worker ended without a result is `lost` (the error quotes the worker's stderr), an id never seen is
+`unknown`. When the worker cannot be spawned, or with `KICAD_LAYER_JOBS=thread`, the job runs in a thread
+of the server as before and is `lost` if the server goes away. FreeRouting has no save-and-stop command
 when headless: at `autoroute`'s `timeout_s` the process is asked to terminate, killed after fifteen
 seconds, and a session file it wrote before that is still parsed and merged (the log tail says so);
 without one the call fails with `ROUTER_FAILED` as before.

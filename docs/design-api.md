@@ -6,7 +6,8 @@ source file only to change the library.
 
 A board is data on `kicad_layer.design`: a signal table, one `Circuit` and one `Layout` per sheet,
 a `ModuleSheet` for the module, a `Board` of placements, a `Project`. The build writes the KiCad
-files; KiCad's ERC and DRC are the tests. `examples/hello_world` is the smallest complete project.
+files; KiCad's ERC and DRC are the tests. `examples/two_layer_basic` is the smallest complete project on it
+(`examples/hello_world` predates the package and drives the writers directly).
 
 ## A sheet in twelve lines
 
@@ -32,7 +33,8 @@ LAYOUT = Layout()                                                  # plain: rows
 
 `Circuit.check()` runs before drawing: every pin on exactly one net or declared open, every signal of
 the sheet used, nothing else called a signal. A placed `Layout(parts={...})` follows a plan and is
-linted for geometry.
+linted for geometry. A multi-unit symbol is drawn unit by unit: `Layout(parts={"U4": At(...), "U4/B": At(...),
+"U4/C": At(...)})` places a dual opamp's units A, B and its power unit (the flow places any left out).
 
 ## The loop
 
@@ -42,6 +44,7 @@ python <project>/design/build.py --preview Power     # one PNG per named sheet i
 python <project>/design/build.py --sch-only --review  # plus the pad-for-pad comparison with the project's Review reference
 python <project>/design/build.py                     # plus the board and DRC; --reopen / --promote for KiCad
 python <project>/design/build.py --route-stubs       # and route what DRC leaves open on single-ended nets, then build again
+python <project>/design/build.py --offline           # no kicad-cli (or none found): sheets, project, board on the descriptions' netlist; UNVERIFIED
 python -m pytest <project>/tests -q                  # every sheet read back against its description
 python -m kicad_layer.design.inspect <build> parts   # questions about a built board: parts, part, net, pin, classes, drc, unrouted, bbox,
                                                      #   region, free, spots, clear, clear-via (copper geometry with the project's clearances)
@@ -56,22 +59,24 @@ Circuits as descriptions: parts, pins and nets, and not one coordinate.
 What is connected to what on one sheet, with no coordinates. ``signals`` are the sheet's signals from the project's table: the names it must carry and their label shapes. Build with ``part()``, then ``signal()``, ``rail()``, ``gnd()``, ``net()``, ``flag()``, ``nc()``; ``check()`` lists every violation; the renderer draws it.
 
 - `Circuit(sheet: str, signals: Iterable[Signal]) -> None`
-- `part(ref: str, part: Part, *, value_text: str | None = None) -> PartInst`: Add a catalogue part as reference ``ref``; ``value_text`` overrides the Value shown. Pins: ``inst["3"]`` by number or unique name.
+- `part(ref: str, part: Part, *, value_text: str | None = None, dnp: bool = False) -> PartInst`: Add a catalogue part as reference ``ref``; ``value_text`` overrides the Value shown; ``dnp`` marks it do-not-populate (``(dnp yes)`` on every unit). Pins: ``inst["3"]`` by number or unique name.
 - `signal(name: str, *pins: Pin) -> Net`: A sheet signal (a hierarchical label matching a pin of this sheet's symbol on the root).
 - `rail(name: str, *pins: Pin) -> Net`: A power rail (+5V, +3V3 ...): a power symbol on every pin.
 - `gnd(*pins: Pin) -> Net`: Ground: a GND power symbol on every pin.
 - `net(*pins: Pin, name: str | None = None) -> Net`: A private net of this sheet: named by KiCad, or by ``name`` when it is drawn with local labels.
 - `flag(*names: str) -> None`: Declare nets as power sources for ERC: a PWR_FLAG is drawn where each is first labelled.
 - `nc(inst: PartInst, *numbers: str) -> None`: Pins deliberately left open (no-connect flags); every other pin must be on a net.
-- `note(text: str, size: float = 1.5) -> None`: A free text on the sheet; the renderer places it.
+- `note(text: str, size: float = 1.5) -> None`: A free text on the sheet; the renderer stacks the notes under the drawing (or from ``Layout.note_at``).
 - `net_of(pin: Pin) -> Net | None`: The net a pin is on, or None.
 - `check() -> list[str]`: Everything a circuit must satisfy before anyone draws it.
 
 ### PartInst
 
-A part with a reference, its pins known from the library symbol.
+A part with a reference, its pins known from the library symbol, each with the unit it is drawn on.
 
-- `PartInst(ref: str, part: Part, value_text: str | None = None) -> None`
+- `PartInst(ref: str, part: Part, value_text: str | None = None, dnp: bool = False) -> None`
+- `.units` (property): The symbol units that carry pins, in order: ``[1]`` for a one-unit part, ``[1, 2, 3]`` for a dual opamp with a power unit.
+- `unit_pins(unit: int) -> list[Pin]`: The pins drawn on ``unit``; pins common to every unit (unit 0) are drawn on the first.
 - `pin(key: str) -> Pin`: By number first, then by name (which must then be unique on the part).
 - `.two_pin` (property)
 
@@ -81,6 +86,7 @@ A part with a reference, its pins known from the library symbol.
 - `number: str`
 - `name: str`
 - `rotation: int`  library pin rotation: 0 leaves the body to the left, 180 to the right, 90 down, 270 up
+- `unit: int = 1`  the symbol unit the pin is drawn on (a dual opamp: 1, 2 and 3 for power); 0 is common to every unit
 
 ### Net
 
@@ -178,20 +184,25 @@ Parts with identity, and values that are numbers.
 
 ## Signals (`design/signals.py`)
 
-Sheet signals: what crosses between a module sheet and its consumer sheets, and which module pin carries it.
+Sheet signals: what crosses between sheets, and which module pin carries it.
 
 ### Signal
 
 - `name: str`
-- `pin: str`  CM5 pin number, as a string
-- `direction: str`  out | in | bi | passive
+- `pin: str`  the module pin: "37", or "J2.37" on a module with several connectors; "" for a sheet-to-sheet signal
+- `direction: str`  out | in | bi | passive, seen from the module (or from ``to``)
 - `sheet: str`  consumer sheet name
 - `note: str = ""`
-- `.cm5_shape` (property)
+- `ref: str = ""`  the module connector the pin is on, when ``pin`` does not say it
+- `to: str = ""`  the other consumer sheet of a signal that does not touch the module
+- `.on_module` (property): Whether a module pin carries it (False for a sheet-to-sheet signal).
+- `.module_pin` (property): ``(reference, number)`` of the module pin; the reference is ``""`` when the table gives the number alone.
+- `.cm5_shape` (property): The label shape on the module side (or on ``to``).
 - `.consumer_shape` (property)
+- `seen_from(sheet: str) -> Signal`: The signal as ``sheet`` carries it: itself on its consumer sheet; on the ``to`` end of a sheet-to-sheet signal, the mirror (``sheet`` and ``to`` swapped, the direction turned), so ``consumer_shape`` fits there too.
 
-- `by_sheet(signals: list[Signal], sheet: str) -> list[Signal]`: The signals one sheet carries, in table order.
-- `check_table(signals: list[Signal], no_connect: dict[str, str], rails: list[str]) -> None`: Every module pin is accounted for exactly once: signal, no-connect or rail.
+- `by_sheet(signals: list[Signal], sheet: str) -> list[Signal]`: The signals one sheet carries, in table order, each as that sheet sees it (``Signal.seen_from``).
+- `check_table(signals: list[Signal], no_connect: dict[str, str], rails: list[str]) -> None`: Every module pin is accounted for exactly once: signal, no-connect or rail. Pins are keys as in ``Signal.pin`` (``"37"`` or ``"J2.37"``); sheet-to-sheet signals take no pin.
 
 ## Layouts (`design/render.py`)
 
@@ -201,10 +212,11 @@ Draw a Circuit as a KiCad sheet, guided by placement hints.
 
 How a circuit is drawn. Without ``parts`` the sheet is plain: anchors in rows, every pin a stub and a label, nothing to lint. With ``parts`` the sheet follows a plan and the build lints its geometry.
 
-- `parts: dict[str, At | Beside] = {}`
+- `parts: dict[str, At | Beside] = {}`  by reference; one unit of a multi-unit part as "U4/2" or "U4/B" ("U4" is unit 1)
 - `flow: Flow | None = field(default_factory=Flow)`  anchors not in ``parts`` are laid out in rows; None demands a place for each
 - `notes: list[tuple[str, Point, float]] = []`
-- `decouple: dict[str, Decouple] = {}`  per anchor: its rail pins
+- `note_at: Point | None = None`  where the circuit's notes (Circuit.note) start; None stacks them under the drawing
+- `decouple: dict[str | tuple[str, str], Decouple] = {}`  per anchor ("U4", "U4/3") or per anchor and rail (("U4", "+9V")): its rail pins
 - `hang: dict[PinKey, Decouple] = {}`  per pin: decoupling on a named private net
 - `attach_to: dict[str, PinKey] = {}`  a two-pin part hangs from this anchor pin, not the first that reaches its net
 - `detour: dict[PinKey, Point] = {}`  after the stub, a bend before the label or series part
@@ -275,6 +287,8 @@ A module sheet from the signal table: the module's connector symbols, a hierarch
 
 ### ModuleSheet
 
+A module sheet as data. A pin is "37" when no other connector of the module has that number, else "J2.37", in ``signals``, ``no_connect``, ``gnd_pins`` and the power groups alike; a shared number left bare is refused.
+
 - `parts: tuple[tuple[str, Part, tuple[float, float], tuple[float, float], tuple[float, float]], ...]`  ref, part, at, ref_pos, value_pos
 - `signals: list[Signal]`
 - `no_connect: list[str]`
@@ -283,11 +297,12 @@ A module sheet from the signal table: the module's connector symbols, a hierarch
 - `gnd_rail: float = 5.08`
 - `label_stub: float = 10.16`
 - `gnd_prefix: str = "GND"`
+- `gnd_pins: tuple[str, ...] = ()`  ground pins ("2" or "J1.2") whatever their name; pins named GND*, AGND, *_GND, VSS* or 0V are ground anyway
 
 ### PowerGroup
 
 - `net: str`
-- `pins: list[str]`  module pin numbers, all on one side of one connector symbol
+- `pins: list[str]`  module pins ("3" or "J2.3"), all on one side of one connector symbol
 - `caps: tuple[tuple[str, Part], ...] = ()`  decoupling along the run, the one nearest the power symbol first
 - `offset: float = 7.62`  the rail's distance outward from the pins
 - `reach: float = 27.94`  the run from the rail to the power symbol
@@ -312,7 +327,7 @@ A board from data: outline, cutouts, poured planes, every footprint's place, tex
 - `radius: float = 3.0`
 - `copper_layers: int = 4`
 - `cutouts: tuple[tuple[Rect, float], ...] = ()`  rounded-rectangle slots: rect, corner radius
-- `planes: tuple[tuple[str, str, str], ...] = ()`  layer, net, zone name; poured over the board less plane_inset
+- `planes: tuple[Plane | tuple[str, str, str], ...] = ()`  a Plane, or (layer, net, zone name) poured over the board less plane_inset
 - `plane_inset: float = 0.5`
 - `placements: tuple[Place | Header, ...] = ()`
 - `keepouts: tuple[Keepout, ...] = ()`
@@ -324,14 +339,14 @@ A board from data: outline, cutouts, poured planes, every footprint's place, tex
 
 ### Place
 
-Where a footprint goes. With ``fit`` (a radius in mm) or ``near`` (a pad to sit by), ``at`` is only the starting point: the build looks for the nearest place where the part fits (courtyards, keep-outs, the edge, and the copper under its pads) and records it in ``placed.json`` beside the routes, so later builds reuse it.
+Where a footprint goes. With ``fit`` (a radius in mm) or ``near`` (a pad to sit by), ``at`` is only the starting point: the build looks for the place nearest ``at`` where the part fits (courtyards, keep-outs, the edge, and the copper under its pads), on a 0.5 mm grid through ``at`` and within the radius of ``at``, or of the pad with ``near``, and records it in ``placed.json`` beside the routes, so later builds reuse it.
 
 - `ref: str`
 - `at: Point`
 - `rot: float = 0.0`
 - `hide_ref: bool = False`
 - `layer: str = "F.Cu"`
-- `near: tuple[str, str] | None = None`  (reference, pad number): the pad the search is centred on
+- `near: tuple[str, str] | None = None`  (reference, pad number): the part stays within the radius of this pad
 - `fit: float = 0.0`  search radius in mm; 0 means exactly ``at``; ``near`` alone searches 6 mm around the pad
 
 ### Header
@@ -358,6 +373,20 @@ A pin header with pin 1 at ``at``, running toward +x (``along_x``) or +y.
 - `size: float = 1.0`
 - `thickness: float = 0.15`
 - `bold: bool = False`
+- `layer: str = "F.SilkS"`
+- `rot: float = 0.0`
+- `justify: tuple[str, ...] = ()`  left | right | top | bottom; text on a back layer is mirrored as KiCad expects
+
+### Plane
+
+A poured zone: over the whole board less ``Board.plane_inset``, or over ``polygon``; ``priority`` decides which of two overlapping zones wins, ``clearance`` is the zone's own (None: the writer's 0.2 mm).
+
+- `layer: str`
+- `net: str`
+- `name: str`
+- `polygon: tuple[Point, ...] | None = None`
+- `clearance: float | None = None`
+- `priority: int = 0`
 
 - `check_placement(board: Board, boxes: dict[str, tuple[float, float, float, float]]) -> list[str]`: Every placement inside the outline, courtyards apart unless ``overlap_ok``, keep-outs respected; returns the problems.
 - `build_board(board: Board, out_path: Path, sheetfile: str, netlist: Netlist, symbol_paths: dict[str, tuple[str, str, str]], setup_template: Path | None, *, date: str, rev: str, company: str, with_routes: bool = True) -> dict`: ``symbol_paths`` maps a reference to (instance path, sheet name, sheet file), as the build has them.
@@ -405,17 +434,18 @@ A reference design the build compares itself with, pad for pad (``design/compare
 
 ### RootLayout
 
-The root sheet: the module sheet in the middle, consumer sheets facing it, one straight wire per signal.
+The root sheet: the module sheet in the middle, consumer sheets facing it, one straight wire per module signal; a net label at both ends of a signal between two consumer sheets. ``module_sheet=None``: a board without a module, whose sheets share only sheet-to-sheet signals. ``module_at`` places the module sheet; its y is where the columns start.
 
-- `module_sheet: str`
-- `left_sheets: list[str]`
-- `right_sheets: list[str]`
+- `module_sheet: str | None = None`
+- `left_sheets: list[str] = []`
+- `right_sheets: list[str] = []`
 - `module_at: tuple[float, float] = (152.4, 25.4)`
 - `sheet_w: float = 50.8`
 - `left_x: float = 63.5`
 - `right_x: float = 254.0`
 - `pitch: float = 2.54`
-- `paper: str = "A3"`
+- `paper: str = "A3"`  the root's paper, and every sheet's unless ``papers`` names it
+- `papers: dict[str, str] = {}`  sheet name -> its own paper ("A4", "A3", "A2" ...); a placeholder sheet defaults to A4
 - `comments: list[str] = []`
 - `extras: Callable[[SchematicBuilder], None] | None = None`  anything else on the root (mounting holes, notes)
 
@@ -423,7 +453,7 @@ The root sheet: the module sheet in the middle, consumer sheets facing it, one s
 
 What goes into the .kicad_pro and the .kicad_dru: built on a KiCad-authored project file so every section exists.
 
-- `template: Path`
+- `template: Path | None`  a KiCad-authored .kicad_pro to build on; None: the package's DEFAULT_TEMPLATE
 - `rules: dict`
 - `classes: list[dict]`
 - `assignments: list[dict]`  KiCad 10 netclass_patterns: [{"netclass": ..., "pattern": ...}]
@@ -431,6 +461,7 @@ What goes into the .kicad_pro and the .kicad_dru: built on a KiCad-authored proj
 - `via_dimensions: list[dict]`
 - `diff_pair_dimensions: list[dict]`
 - `design_rules: str = ""`  the .kicad_dru text, if any
+- `rule_severities: dict[str, str] = {}`  DRC check -> error | warning | ignore, over the template's
 
 - `write_project_file(project: Project, path: Path, sheets: list[list[str]]) -> None`: The .kicad_pro from the template, with the project's rules, classes and sheet list, and its .kicad_dru.
 
@@ -522,7 +553,7 @@ The board's copper and edge in a bucket index, with the rules to judge candidate
 
 ### Rules
 
-What the project file says: net classes with their patterns, and the board-wide minimums.
+What the project file says: net classes with their patterns, the board-wide minimums, and the custom rules of the ``.kicad_dru`` beside it (disallowed vias and tracks, clearances and track widths per net class or net name).
 
 - `classes: dict[str, dict] = {}`
 - `patterns: list[tuple[str, str]] = []`  (class, pattern) in order
@@ -530,11 +561,15 @@ What the project file says: net classes with their patterns, and the board-wide 
 - `hole: float = 0.25`
 - `hole_to_hole: float = 0.25`
 - `default_clearance: float = 0.2`
+- `min_track: float = 0.0`  the board's min_track_width
+- `custom: list[dru.Rule] = []`  the .kicad_dru rules
 - `netclass(net: str | None) -> dict`
+- `facts(net: str | None, kind: str | None = None) -> Facts`: What a .kicad_dru condition may ask of an item of ``net``: the net, its class name, KiCad's item type.
 - `clearance(net: str | None) -> float`
-- `between(a: str | None, b: str | None) -> float`
+- `between(a: str | None, b: str | None) -> float`: The larger class clearance, raised by any custom clearance rule that surely applies to the two nets.
+- `disallowed(what: str, net: str | None) -> str | None`: Why a ``via`` or ``track`` of ``net`` breaks a custom rule, or None. A disallow rule whose condition this model cannot evaluate (an area, a footprint) counts as applying: the copper is left to the author.
 - `via(net: str | None) -> tuple[float, float]`
-- `track(net: str | None) -> float`
+- `track(net: str | None) -> float`: The class track width, at least the board's minimum and any custom ``track_width`` minimum for the net.
 
 ### Item
 
@@ -590,9 +625,13 @@ One unconnected pair from the DRC report: where each end is and on which layer, 
 
 Rule sets a project builds its .kicad_pro on: a fab's limits, the standard net classes, the widths and vias.
 
-- `jlcpcb_4l(template: Path, assignments: list[dict], *, design_rules: str = '', classes: list[dict] | None = None) -> Rules`: The JLCPCB four-layer rule set with a project's net-class assignments and custom design rules.
-- `aisler_4l(template: Path, assignments: list[dict], *, design_rules: str = '', classes: list[dict] | None = None) -> Rules`: The AISLER four-layer rule set with a project's net-class assignments; AISLER's own custom rules come first in the .kicad_dru.
+- `jlcpcb_4l(template: Path | None = None, assignments: list[dict] | None = None, *, design_rules: str = '', classes: list[dict] | None = None, rule_severities: dict[str, str] | None = None) -> Rules`: The JLCPCB four-layer rule set with a project's net-class assignments and custom design rules; no template: the package's.
+- `jlcpcb_2l(template: Path | None = None, assignments: list[dict] | None = None, *, design_rules: str = '', classes: list[dict] | None = None, rule_severities: dict[str, str] | None = None) -> Rules`: The JLCPCB two-layer 1.6 mm 1 oz rule set with a project's net-class assignments and custom design rules; no template: the package's.
+- `aisler_4l(template: Path | None = None, assignments: list[dict] | None = None, *, design_rules: str = '', classes: list[dict] | None = None, rule_severities: dict[str, str] | None = None) -> Rules`: The AISLER four-layer rule set with a project's net-class assignments; AISLER's own custom rules come first in the .kicad_dru.
 - `merge_design_rules(*texts: str) -> str`: One .kicad_dru text from several: a single version line first, then each text's rules in order.
+- `SILK_WARNINGS = {'silk_overlap': 'warning', 'silk_over_copper': 'warning'}`
+- `JLCPCB_2L = {'min_clearance': 0.15, 'min_track_width': 0.15, 'min_via_diameter': 0.6, 'min_through_hole_diameter': 0.3, 'm...`
+- `JLCPCB_2L_CLASSES = [{'name': 'Default', 'clearance': 0.2, 'track_width': 0.25, 'via_diameter': 0.6, 'via_drill': 0.3, 'diff_pair_...`
 - `STANDARD_CLASSES = [{'name': 'Default', 'clearance': 0.125, 'track_width': 0.15, 'via_diameter': 0.6, 'via_drill': 0.3, 'diff_pai...`
 - `AISLER_CLASSES = [{'name': 'Default', 'clearance': 0.125, 'track_width': 0.15, 'via_diameter': 0.6, 'via_drill': 0.3, 'diff_pai...`
 - `TRACK_WIDTHS = [0.0, 0.15, 0.1722, 0.2332, 0.3, 0.5, 1.0]`
@@ -604,6 +643,13 @@ Rule sets a project builds its .kicad_pro on: a fab's limits, the standard net c
 Generate a project and validate it with kicad-cli.
 
 - `main(project: Project, argv: list[str]) -> int`: The build pipeline for ``project`` with the flags in this module's docstring; returns the exit code.
+- `symbol_paths(root, children: dict, root_file: str) -> dict[str, tuple[str, str, str]]`: Instance path, sheet name and sheet file for every placed symbol, as the board needs them.
+
+## Offline builds: the netlist from the descriptions (`design/offline.py`)
+
+A netlist from the descriptions, for a build without kicad-cli (``build.py --offline``).
+
+- `synth_netlist(sheets: Mapping[str, object], drawn: Mapping[str, SchematicBuilder] | None = None, *, root: SchematicBuilder | None = None, source: str = '') -> tuple[Netlist, list[str]]`: The netlist the descriptions give, and notes on what it could not cover.
 
 ## Checks with kicad-cli, KiCad closed (`design/verify.py`)
 

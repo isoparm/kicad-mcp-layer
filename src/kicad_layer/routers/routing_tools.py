@@ -81,11 +81,13 @@ def autoroute(board: Path, project: Path | None, *, routes_in: Path | None, rout
     exp = dsn_mod.write_dsn_export(board, dsn_path, project, options=opts)
     run = freerouting.run(dsn_path, ses_path, max_passes=passes, improvement_threshold=0.5, timeout_s=timeout_s, ignore_classes=tuple(exp.ignore_classes))
     new = ses_mod.parse_ses(ses_path)
-    # FreeRouting up to 2.3 applies -inc only in its GUI, so a headless run routes the excluded nets anyway: drop that copper
+    # -inc is passed, but FreeRouting headless (2.4.1 included) may route the excluded nets anyway: always drop that copper
+    routed_excluded = sorted(({s.net for s in new.segments} | {v.net for v in new.vias}) & set(exp.excluded))
     new, dropped = drop_nets(new, set(exp.excluded))
     warnings = list(exp.warnings)
     if dropped:
-        warnings.append(f"FreeRouting routed excluded nets anyway ({dropped} segments and vias dropped); versions before 2.4 ignore -inc when headless.")
+        names = ", ".join(routed_excluded[:5]) + (", ..." if len(routed_excluded) > 5 else "")
+        warnings.append(f"FreeRouting routed excluded nets anyway ({len(routed_excluded)}: {names}); the copper was dropped ({dropped} segments and vias).")
     merged = routes_mod.merge(existing, new, replace_nets=True)
     out = _routes_path(board, routes_out)
     routes_mod.save(merged, out)

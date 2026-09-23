@@ -1054,6 +1054,21 @@ def _register_docs(mcp: MCPServer) -> None:
         return DocFacts(part=part, found=True, path=display(path), section=section, text=text, sections=headings)
 
 
+def _result_of(call) -> Any:
+    """A tool call's result as a job keeps it: the structured output, or the text of a tool without one."""
+    if call.structured_content is not None:
+        return call.structured_content
+    return {"text": [c.text for c in call.content if getattr(c, "type", "") == "text"]}
+
+
+def run_job_tool(tool: str, args: dict[str, Any], tier: str) -> Any:
+    """What a job's worker process runs (``jobs.spawn_worker``): the tool through a server of the same tier,
+    so its arguments are checked and its errors raised exactly as in a direct call."""
+    from kicad_layer.server import build_server
+
+    return _result_of(asyncio.run(build_server(tier).call_tool(tool, args)))
+
+
 def _register_jobs(mcp: MCPServer, tier: str = "core") -> None:
     available = set(tool_names(tier))
 
@@ -1063,25 +1078,23 @@ def _register_jobs(mcp: MCPServer, tier: str = "core") -> None:
         return JobStatus(id=job.id, tool=job.tool, state=job.state, elapsed_s=job.elapsed(), progress=dict(job.progress), log_tail=list(job.lines)[-15:],
                          error=job.error, hint=hints.get(job.state))
 
-    def _result_of(call) -> Any:
-        if call.structured_content is not None:
-            return call.structured_content
-        return {"text": [c.text for c in call.content if getattr(c, "type", "") == "text"]}
-
     @mcp.tool(annotations=WRITES_ARTIFACTS)
     def job_start(
         tool: Annotated[Literal[JOB_TOOLS], Field(description="The tool to run in the background.")],  # type: ignore[valid-type]
         args: Annotated[dict[str, Any] | None, Field(description="Its arguments, exactly as for a direct call.")] = None,
     ) -> JobStatus:
         """Run a long tool (autoroute, run_drc, run_erc, pcb_refill_zones, render_board, review_board) in the
-        background of this server and return a job id at once, so a big board does not hit the client's
-        request timeout. Poll job_status, then take the tool's normal result from job_result. The tool
-        checks its arguments and its tier as a direct call would; the work is never stopped because a call returned."""
+        background (a worker process that outlives a restart of this server) and return a job id at once,
+        so a big board does not hit the client's request timeout. Poll job_status, then take the tool's normal
+        result from job_result. The tool checks its arguments and its tier as a direct call would; the work is
+        never stopped because a call returned."""
         if tool not in available:
             raise LayerError(INVALID_ARGUMENT, f"{tool} is not registered in the {tier} tier of this server.",
                              hint="Start the server with KICAD_LAYER_TOOLS=full for the design-edit and routing tools.")
         arguments = dict(args or {})
-        job = jobs_mod.runner().start(tool, arguments, lambda: _result_of(asyncio.run(mcp.call_tool(tool, arguments))))
+        # a detached worker process, so the job survives a restart of this server; a thread of it when that fails
+        job = jobs_mod.runner().start(tool, arguments, lambda: _result_of(asyncio.run(mcp.call_tool(tool, arguments))),
+                                      target="kicad_layer.tools:run_job_tool", target_args={"tool": tool, "args": arguments, "tier": tier})
         return _status(job)
 
     @mcp.tool(annotations=READ_ONLY)
@@ -1089,9 +1102,10 @@ def _register_jobs(mcp: MCPServer, tier: str = "core") -> None:
         job_id: Annotated[str, Field(description="The id job_start returned.")],
         wait_s: Annotated[float, Field(description="Wait up to this long for the job to finish before answering.", ge=0, le=50)] = 0,
     ) -> JobStatus:
-        """The state of a background job (queued, running, done, failed; lost when the server restarted while
-        it ran, unknown for an id this server never saw), the time so far, the last lines of its output and,
-        for autoroute, FreeRouting's pass, unrouted and violation counts."""
+        """The state of a background job (queued, running, done, failed; lost when its worker process ended
+        without a result, unknown for an id no server saw), the time so far, the last lines of its output and,
+        for autoroute, FreeRouting's pass, unrouted and violation counts. A job started before a server restart
+        is reported here the same way."""
         job = jobs_mod.runner().wait(job_id, wait_s)
         if job is None:
             return JobStatus(id=job_id, state="unknown", hint="No job with this id; job_start gives one.")

@@ -43,3 +43,39 @@ def test_rule_sets_hand_out_copies():
     assert rules.AISLER_4L_35UM["min_track_width"] == 0.125 and rules.AISLER_CLASSES[0]["clearance"] == 0.125 and 7.0 not in rules.AISLER_TRACK_WIDTHS
     j = rules.jlcpcb_4l(TEMPLATE, ASSIGN, design_rules="(version 1)\n")
     assert j.rules["min_track_width"] == 0.1 and j.design_rules == "(version 1)\n"
+
+
+def _write(tmp_path, rules_obj, sheets=(("11111111-2222-3333-4444-555555555555", "Root"),)):
+    import json
+    from types import SimpleNamespace
+
+    from kicad_layer.design.project import write_project_file
+
+    write_project_file(SimpleNamespace(name="t", rules=rules_obj), tmp_path / "t.kicad_pro", [list(s) for s in sheets])
+    return json.loads((tmp_path / "t.kicad_pro").read_text(encoding="utf-8"))
+
+
+def test_a_rule_set_needs_no_template_and_keeps_silkscreen_a_warning(tmp_path):
+    from kicad_layer.design.project import DEFAULT_TEMPLATE
+
+    assert DEFAULT_TEMPLATE.is_file()
+    for make in (rules.jlcpcb_4l, rules.aisler_4l):
+        pro = _write(tmp_path, make(assignments=ASSIGN, rule_severities={"courtyards_overlap": "warning"}))
+        sev = pro["board"]["design_settings"]["rule_severities"]
+        assert (sev["silk_overlap"], sev["silk_over_copper"], sev["courtyards_overlap"]) == ("warning", "warning", "warning")
+        assert sev["clearance"] == "error"  # the template's severities stay under the project's
+        assert [c["name"] for c in pro["net_settings"]["classes"]][0] == "Default"
+        assert pro["net_settings"]["netclass_patterns"] == ASSIGN
+    assert pro["schematic"]["top_level_sheets"] == [{"filename": "t.kicad_sch", "name": "t", "uuid": "11111111-2222-3333-4444-555555555555"}]
+
+
+def test_a_project_severity_overrides_the_rule_set(tmp_path):
+    pro = _write(tmp_path, rules.jlcpcb_4l(assignments=ASSIGN, rule_severities={"silk_overlap": "error"}))
+    assert pro["board"]["design_settings"]["rule_severities"]["silk_overlap"] == "error"
+
+
+def test_a_severity_must_be_one_kicad_knows(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError, match="rule_severities"):
+        _write(tmp_path, rules.jlcpcb_4l(rule_severities={"silk_overlap": "warn"}))

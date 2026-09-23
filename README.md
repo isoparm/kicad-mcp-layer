@@ -241,6 +241,8 @@ If this project is useful to you, please visit [kicad.org](https://www.kicad.org
 * [kicad-ai-stack](https://github.com/ShamanAndrey/kicad-ai-stack): the workspace around this library, with
   the setup script and the working rules for a Claude Code session.
 * [examples/hello_world](examples/hello_world): a complete board as data on this library, the first one it built.
+* [examples/two_layer_basic](examples/two_layer_basic): the smallest complete project on the design package
+  (`Circuit`, `Layout`, `Board`, `Project`), a two-layer board.
 * [docs/tools.md](docs/tools.md) the tool reference, [docs/design-api.md](docs/design-api.md) the authoring API.
 
 ## Acknowledgements

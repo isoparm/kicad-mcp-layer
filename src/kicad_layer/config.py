@@ -24,6 +24,9 @@ Environment variables:
 ``KICAD_LAYER_TOOLS``
     Which tools the server registers: ``core`` (default: checks, exports, renders, reviews,
     libraries, documents, board reads) or ``full`` (plus the design-edit tools and the routers).
+``KICAD_LAYER_JOBS``
+    ``worker`` (default): ``job_start`` runs each job in a detached worker process that outlives a
+    server restart; ``thread``: in a thread of the server (lost when the server goes away).
 """
 
 from __future__ import annotations

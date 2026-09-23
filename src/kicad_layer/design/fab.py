@@ -96,12 +96,13 @@ def pcbway_package(name: str, build: Path, out: Path) -> int:
         shutil.rmtree(out)
     out.mkdir(parents=True)
 
-    fab = export_fab(board, output_dir=str(out), gerbers=True, drill=True, position=True)
+    # parts marked do-not-populate (Circuit.part(..., dnp=True)) are neither bought nor placed
+    fab = export_fab(board, output_dir=str(out), gerbers=True, drill=True, position=True, exclude_dnp=True)
     print(f"fabrication files: {len(fab.files)} in {fab.output_dir} ({fab.duration_s}s)")
     for w in fab.warnings:
         print(f"   warning: {w}")
 
-    bom = export_bom(root_sch, fields=BOM_FIELDS, group_by=["Value", "Footprint", "MPN"], output_path=str(out / f"{name}-bom-kicad.csv"))
+    bom = export_bom(root_sch, fields=BOM_FIELDS, group_by=["Value", "Footprint", "MPN"], output_path=str(out / f"{name}-bom-kicad.csv"), exclude_dnp=True)
     attrs = footprint_attrs(board)
     rows: list[list[str]] = []
     missing: list[str] = []

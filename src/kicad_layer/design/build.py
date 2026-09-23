@@ -7,7 +7,7 @@ after the netlist. While KiCad holds the project (lock
 files), the build goes to ``_staging`` next to the project and ``--promote`` copies it in once
 KiCad has closed.
 
-    build.py [--out DIR | --force] [--reopen] [--no-routes] [--sch-only] [--no-render] [--review] [--route-stubs]
+    build.py [--out DIR | --force] [--reopen] [--no-routes] [--sch-only] [--no-render] [--review] [--route-stubs] [--offline]
     build.py --promote [--wait] | --status | --close | --open | --preview [SHEET ...] | --blocks | --seed
 
 ``--sch-only`` stops after the netlist and its gates (seconds, no board); ``--no-render`` skips the
@@ -17,6 +17,11 @@ prints the pins that differ and writes the full report into ``review/``; ``--rou
 the DRC leaves open on single-ended nets over the copper model (``design/stubs.py``), saves the copper
 into ``routing/routes.json`` and builds once more. Placements with ``fit`` or ``near`` are resolved by
 the board build itself and recorded in ``routing/placed.json``.
+
+``--offline`` builds without kicad-cli, and the build goes offline by itself when kicad-cli is not
+found: the sheets, the lint, the ``.kicad_pro``/``.kicad_dru`` and the board are written, the board
+from a netlist synthesized from the sheets' descriptions (``design/offline.py``); ERC, the netlist
+gates, DRC, ``--route-stubs``, ``--review`` and the render are skipped and reported UNVERIFIED.
 """
 from __future__ import annotations
 
@@ -29,9 +34,10 @@ from kicad_layer.cli import netlist as netlist_mod
 from kicad_layer.cli import reports, runner
 from kicad_layer.cli.discovery import find_kicad_cli
 from kicad_layer.config import load_settings, set_settings
+from kicad_layer.errors import KICAD_CLI_NOT_FOUND, LayerError
 
 from . import compare as compare_mod
-from . import gui, netcompare, parts, verify
+from . import gui, netcompare, offline, parts, verify
 from .lint import lint
 from .render import Described
 from .project import Project, write_project_file
@@ -116,6 +122,27 @@ def _matches_reference(project: Project, xml_path: Path, symbol_paths: dict[str,
     return ok
 
 
+def symbol_paths(root, children: dict, root_file: str) -> dict[str, tuple[str, str, str]]:
+    """Instance path, sheet name and sheet file for every placed symbol, as the board needs them.
+
+    A symbol with several units takes the path of its lowest unit, as KiCad does when it updates the
+    board from the schematic; ``root`` and ``children`` are what ``build_design`` returns.
+    """
+    found: dict[str, tuple[int, tuple[str, str, str]]] = {}
+
+    def keep(ref: str, unit: int, entry: tuple[str, str, str]) -> None:
+        if ref not in found or unit < found[ref][0]:
+            found[ref] = (unit, entry)
+
+    for sheet in root.sheets:
+        cb = children[sheet.name]
+        for p in cb.placed:
+            keep(p.ref, p.unit, (f"{cb.path}/{p.uuid}", f"/{sheet.name}/", sheet.file))
+    for p in root.placed:
+        keep(p.ref, p.unit, (f"{root.path}/{p.uuid}", "/", root_file))
+    return {ref: entry for ref, (_, entry) in found.items()}
+
+
 def main(project: Project, argv: list[str]) -> int:
     """The build pipeline for ``project`` with the flags in this module's docstring; returns the exit code."""
     P = project.dir
@@ -167,17 +194,30 @@ def main(project: Project, argv: list[str]) -> int:
             print(f"KiCad holds {', '.join(p.name for p in locks)}: building into {out}")
     workspace = P.parent if str(out).startswith(str(P.parent)) else out.parent
     set_settings(load_settings({"KICAD_LAYER_WORKSPACE": str(workspace)}))
-    cli = find_kicad_cli()
-    print(f"kicad-cli {cli.version} at {cli.path}")
+    cli = None
+    offline_why = "--offline" if "--offline" in argv else ""
+    if not offline_why:
+        try:
+            cli = find_kicad_cli()
+            print(f"kicad-cli {cli.version} at {cli.path}")
+        except LayerError as ex:
+            if ex.code != KICAD_CLI_NOT_FOUND:
+                raise
+            offline_why = f"kicad-cli not found ({ex})"
+    if offline_why:
+        print(f"WARNING offline build ({offline_why}): ERC, KiCad's netlist and its gates, DRC and the render are SKIPPED (UNVERIFIED); "
+              "the board, if any, is built on a netlist synthesized from the descriptions")
     if project.check_signals is not None:
         project.check_signals()
     project.register_libraries()  # regenerates the project's own library first, so an --out copy below is current
-    if out != P:
+    if out != P:  # the project's own library tables and library, where it has them
         for f in ("sym-lib-table", "fp-lib-table"):
-            shutil.copy2(P / f, out / f)
-        if (out / "lib").exists():
-            shutil.rmtree(out / "lib")
-        shutil.copytree(project.lib_dir, out / "lib")
+            if (P / f).is_file():
+                shutil.copy2(P / f, out / f)
+        if project.lib_dir.is_dir():
+            if (out / "lib").exists():
+                shutil.rmtree(out / "lib")
+            shutil.copytree(project.lib_dir, out / "lib")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     backup = out / f"_backup-{stamp}"
     for p in list(out.glob("*.kicad_sch")) + list(out.glob("*.kicad_pcb")) + list(out.glob("*.kicad_pro")):
@@ -213,6 +253,8 @@ def main(project: Project, argv: list[str]) -> int:
     print(f"schematic written: root + {len(root.sheets)} sheets, {n_sym} symbols, in {time.time() - t0:.1f}s")
 
     root_sch = out / f"{project.name}.kicad_sch"
+    if offline_why:
+        return _offline_board(project, argv, out, root, children, root_sch)
     erc = reports.run_erc(root_sch, severity="all")
     print(f"ERC: {erc.verdict} {erc.counts}")
     for f in erc.findings[:40]:
@@ -221,17 +263,10 @@ def main(project: Project, argv: list[str]) -> int:
     xml_path, _, _ = netlist_mod.export_netlist(root_sch, refresh=True)  # exported even after an ERC failure: the reference gate reports either way
     net = netlist_mod.load_netlist(root_sch, refresh=False, include_components=True, max_nets=5000)
     print(f"netlist: {net.component_count} components, {net.net_count} nets")
-    # instance path, sheet name and file for every placed symbol, as the board needs them
-    symbol_paths: dict[str, tuple[str, str, str]] = {}
-    for sheet in root.sheets:
-        cb = children[sheet.name]
-        for p in cb.placed:
-            symbol_paths[p.ref] = (f"{cb.path}/{p.uuid}", f"/{sheet.name}/", sheet.file)
-    for p in root.placed:
-        symbol_paths[p.ref] = (f"{root.path}/{p.uuid}", "/", root_sch.name)
+    paths = symbol_paths(root, children, root_sch.name)
 
     described_ok = _matches_descriptions(project, xml_path)
-    reference_ok = project.reference_netlist is None or _matches_reference(project, xml_path, symbol_paths)
+    reference_ok = project.reference_netlist is None or _matches_reference(project, xml_path, paths)
     if not erc_ok:
         print("stopping: ERC did not pass")
         return 1
@@ -267,7 +302,7 @@ def main(project: Project, argv: list[str]) -> int:
                 print("KiCad holds the board: close the PCB editor, then run --seed")
                 return 1
             try:
-                for line in seed_mod.seed_board(project, pcb_path, root_sch.name, net, symbol_paths):
+                for line in seed_mod.seed_board(project, pcb_path, root_sch.name, net, paths):
                     print(line)
             except ValueError as ex:
                 print(f"seed refused: {ex}")
@@ -277,9 +312,10 @@ def main(project: Project, argv: list[str]) -> int:
         return 0
     pcb_path = out / f"{project.name}.kicad_pcb"
     routes_path = P / "routing" / "routes.json"
+    stubs_routed = 0
     for attempt in (0, 1):
         t1 = time.time()
-        stats = project.board_builder(pcb_path, root_sch.name, net, symbol_paths, project.setup_template, with_routes="--no-routes" not in argv)
+        stats = project.board_builder(pcb_path, root_sch.name, net, paths, project.setup_template, with_routes="--no-routes" not in argv)
         fitted = stats.pop("fitted", [])
         print(f"board written: {pcb_path.name} {stats} in {time.time() - t1:.1f}s")
         for line in fitted:
@@ -297,17 +333,22 @@ def main(project: Project, argv: list[str]) -> int:
         blocking = [f for f in drc.findings if f.severity == "error" and f.type != "unconnected_items"]
         for f in blocking[:30]:
             print(f"   ERROR {f.type}: {f.description} | " + " ; ".join(f"{i.description} @({i.x_mm},{i.y_mm})" for i in f.items[:2]))
-        if attempt == 0 and "--route-stubs" in argv and drc.counts.get("unconnected") and routes_path.is_file():
+        if attempt == 1 and stubs_routed and not stats.get("routed_segments") and not stats.get("routed_vias"):
+            print(f"stubs: the rebuilt board carries no saved copper; point the project's Board.routes at {routes_path} to apply it")
+        if attempt == 0 and "--route-stubs" in argv and drc.counts.get("unconnected"):
             from kicad_layer import routes as routes_mod
             from kicad_layer.review import load_board
 
             from . import copper, stubs
             opens = stubs.open_connections(json.loads((out / "_drc.json").read_text(encoding="utf-8")))
-            res = stubs.route_stubs(load_board(pcb_path), copper.Rules.load(out / f"{project.name}.kicad_pro"), opens, pcb_path, routes=routes_mod.load(routes_path))
+            saved = routes_mod.load(routes_path) if routes_path.is_file() else routes_mod.Routes()  # a fresh board has no routes.json yet
+            res = stubs.route_stubs(load_board(pcb_path), copper.Rules.load(out / f"{project.name}.kicad_pro"), opens, pcb_path, routes=saved)
             for line in res.lines:
                 print(f"   stubs: {line}")
             if res.routed:
+                routes_path.parent.mkdir(parents=True, exist_ok=True)
                 routes_mod.save(res.routes, routes_path)
+                stubs_routed = res.routed
                 print(f"stubs: {res.routed} routed, {res.failed} failed, {res.skipped} skipped; routes.json updated, building again")
                 continue
             print(f"stubs: nothing routed ({res.failed} failed, {res.skipped} skipped)")
@@ -326,3 +367,34 @@ def main(project: Project, argv: list[str]) -> int:
     elif reopen and not blocking:
         gui.open_kicad(project.gui_task)
     return 0 if not blocking else 1
+
+
+def _offline_board(project: Project, argv: list[str], out: Path, root, children: dict, root_sch: Path) -> int:
+    """The rest of an offline build: the descriptions' netlist and, with a board builder, the board; nothing checked."""
+    print("ERC: UNVERIFIED (offline)")
+    paths = symbol_paths(root, children, root_sch.name)
+    net, notes = offline.synth_netlist(project.sheets(), children, root=root, source=str(root_sch))
+    print(f"netlist: {net.component_count} components, {net.net_count} nets, SYNTHESIZED from the descriptions (not KiCad's; the gates are UNVERIFIED)")
+    for line in notes:
+        print(f"   note: {line}")
+    for flag in ("--review", "--route-stubs"):
+        if flag in argv:
+            print(f"{flag}: skipped offline (it needs kicad-cli)")
+    if "--sch-only" in argv:
+        print("schematic only: stopping after the netlist")
+        return 0
+    if project.board_builder is None:
+        if "--seed" in argv:
+            print("--seed refused offline: the first import of a hand-made board takes KiCad's netlist")
+            return 1
+        print("no board builder: schematic-only build")
+        return 0
+    pcb_path = out / f"{project.name}.kicad_pcb"
+    t1 = time.time()
+    stats = project.board_builder(pcb_path, root_sch.name, net, paths, project.setup_template, with_routes="--no-routes" not in argv)
+    fitted = stats.pop("fitted", [])
+    print(f"board written: {pcb_path.name} {stats} in {time.time() - t1:.1f}s")
+    for line in fitted:
+        print(f"   placed: {line}")
+    print("DRC: UNVERIFIED (offline; zones not filled). Build again with kicad-cli before trusting or ordering this board.")
+    return 0

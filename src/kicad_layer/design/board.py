@@ -17,7 +17,8 @@ from kicad_layer.ids import IdFactory
 from kicad_layer.kicad_libs import Footprint, load_footprint, rotate_about
 from kicad_layer.models import Netlist
 from kicad_layer.pcb_writer import BoardBuilder
-from kicad_layer.sexpr import child, children, value
+from kicad_layer.review import COURTYARD_SHAPES, courtyard_points
+from kicad_layer.sexpr import value
 
 Point = tuple[float, float]
 Rect = tuple[float, float, float, float]  # x0, y0, x1, y1
@@ -26,15 +27,16 @@ Rect = tuple[float, float, float, float]  # x0, y0, x1, y1
 @dataclass(frozen=True)
 class Place:
     """Where a footprint goes. With ``fit`` (a radius in mm) or ``near`` (a pad to sit by), ``at`` is only the
-    starting point: the build looks for the nearest place where the part fits (courtyards, keep-outs, the edge,
-    and the copper under its pads) and records it in ``placed.json`` beside the routes, so later builds reuse it."""
+    starting point: the build looks for the place nearest ``at`` where the part fits (courtyards, keep-outs, the
+    edge, and the copper under its pads), on a 0.5 mm grid through ``at`` and within the radius of ``at``, or of
+    the pad with ``near``, and records it in ``placed.json`` beside the routes, so later builds reuse it."""
 
     ref: str
     at: Point
     rot: float = 0.0
     hide_ref: bool = False
     layer: str = "F.Cu"
-    near: tuple[str, str] | None = None  # (reference, pad number): the pad the search is centred on
+    near: tuple[str, str] | None = None  # (reference, pad number): the part stays within the radius of this pad
     fit: float = 0.0  # search radius in mm; 0 means exactly ``at``; ``near`` alone searches 6 mm around the pad
 
 
@@ -66,6 +68,22 @@ class Text:
     size: float = 1.0
     thickness: float = 0.15
     bold: bool = False
+    layer: str = "F.SilkS"
+    rot: float = 0.0
+    justify: tuple[str, ...] = ()  # left | right | top | bottom; text on a back layer is mirrored as KiCad expects
+
+
+@dataclass(frozen=True)
+class Plane:
+    """A poured zone: over the whole board less ``Board.plane_inset``, or over ``polygon``; ``priority`` decides which of
+    two overlapping zones wins, ``clearance`` is the zone's own (None: the writer's 0.2 mm)."""
+
+    layer: str
+    net: str
+    name: str
+    polygon: tuple[Point, ...] | None = None
+    clearance: float | None = None
+    priority: int = 0
 
 
 @dataclass(frozen=True)
@@ -76,7 +94,7 @@ class Board:
     radius: float = 3.0
     copper_layers: int = 4
     cutouts: tuple[tuple[Rect, float], ...] = ()  # rounded-rectangle slots: rect, corner radius
-    planes: tuple[tuple[str, str, str], ...] = ()  # layer, net, zone name; poured over the board less plane_inset
+    planes: tuple[Plane | tuple[str, str, str], ...] = ()  # a Plane, or (layer, net, zone name) poured over the board less plane_inset
     plane_inset: float = 0.5
     placements: tuple[Place | Header, ...] = ()
     keepouts: tuple[Keepout, ...] = ()
@@ -91,24 +109,18 @@ class Board:
 
 
 def courtyard_bbox(fp: Footprint, at: Point, rot: float) -> Rect | None:
-    """Absolute bounding box of the footprint's front courtyard, or of its pads when it has none."""
+    """Absolute bounding box of the footprint's front courtyard (lines, rectangles, arcs, polygons, circles), or of its
+    pads when it has none."""
     xs: list[float] = []
     ys: list[float] = []
     for g in fp.tree:
-        if not isinstance(g, list) or str(g[0]) not in ("fp_line", "fp_rect", "fp_arc", "fp_poly", "fp_circle"):
+        if not isinstance(g, list) or str(g[0]) not in COURTYARD_SHAPES:
             continue
         if value(g, "layer") != "F.CrtYd":
             continue
-        for k in ("start", "end", "mid"):
-            c = child(g, k)
-            if c is not None:
-                xs.append(float(c[1]))
-                ys.append(float(c[2]))
-        pts = child(g, "pts")
-        if pts is not None:
-            for xy in children(pts, "xy"):
-                xs.append(float(xy[1]))
-                ys.append(float(xy[2]))
+        for x, y in courtyard_points(g):
+            xs.append(x)
+            ys.append(y)
     if not xs:
         for p in fp.pads:
             xs += [p.x - p.size[0] / 2, p.x + p.size[0] / 2]
@@ -170,8 +182,9 @@ def fit_placements(board: Board, wanted: list[Place], out_path: Path, sheetfile:
     """The nearest free place for every ``fit``/``near`` placement, from ``placed.json`` when it already holds one.
 
     A provisional board with the wanted parts at their starting points gives the copper model; each part
-    is then tried on a 0.5 mm grid around its centre, nearest first, against the design's placement
-    rules and the copper questions, and the first place that fits is recorded.
+    is then tried on a 0.5 mm grid through its ``at``, nearest ``at`` first, within the radius of ``at``
+    (or of the ``near`` pad), against the design's placement rules and the copper questions, and the
+    first place that fits is recorded. A recorded place is reused while ``rot``, ``near`` and ``at`` stay.
     """
     record_path = board.routes.with_name("placed.json") if board.routes is not None else None
     recorded: dict[str, dict] = json.loads(record_path.read_text(encoding="utf-8")) if record_path is not None and record_path.is_file() else {}
@@ -180,7 +193,7 @@ def fit_placements(board: Board, wanted: list[Place], out_path: Path, sheetfile:
     pending: list[Place] = []
     for p in wanted:
         r = recorded.get(p.ref)
-        if r and r.get("rot") == p.rot and r.get("near") == (list(p.near) if p.near else None):
+        if r and r.get("rot") == p.rot and r.get("near") == (list(p.near) if p.near else None) and r.get("seed", list(p.at)) == list(p.at):
             positions[p.ref] = ((float(r["at"][0]), float(r["at"][1])), p.rot)
             notes.append(f"{p.ref} at ({r['at'][0]}, {r['at'][1]}) from placed.json")
         else:
@@ -210,7 +223,7 @@ def fit_placements(board: Board, wanted: list[Place], out_path: Path, sheetfile:
         radius = p.fit or 6.0
         lib, name = comps[p.ref].footprint.split(":", 1)
         fp = load_footprint(lib, name)
-        spot = _fit_search(board, model, boxes, p, fp, centre, radius)
+        spot = _fit_search(board, model, boxes, p, fp, centre, radius, seed=p.at)
         if spot is None:
             tmp.unlink(missing_ok=True)
             raise AssertionError(f"{p.ref}: no place fits within {radius} mm of {anchor} (rot {p.rot:g}); widen fit or move the start")
@@ -218,8 +231,9 @@ def fit_placements(board: Board, wanted: list[Place], out_path: Path, sheetfile:
         bb = courtyard_bbox(fp, spot, (p.rot + 180) % 360 if p.layer == "B.Cu" else p.rot)
         if bb is not None:
             boxes[p.ref] = bb
-        recorded[p.ref] = {"at": [spot[0], spot[1]], "rot": p.rot, "near": list(p.near) if p.near else None, "fit": radius, "centre": [round(centre[0], 3), round(centre[1], 3)]}
-        notes.append(f"{p.ref} fitted at ({spot[0]}, {spot[1]}), {math.dist(spot, centre):.1f} mm from {anchor}")
+        recorded[p.ref] = {"at": [spot[0], spot[1]], "rot": p.rot, "near": list(p.near) if p.near else None, "fit": radius, "centre": [round(centre[0], 3), round(centre[1], 3)],
+                           "seed": list(p.at)}
+        notes.append(f"{p.ref} fitted at ({spot[0]}, {spot[1]}), {math.dist(spot, p.at):.1f} mm from its start" + (f", {math.dist(spot, centre):.1f} mm from {anchor}" if p.near else ""))
     tmp.unlink(missing_ok=True)
     if record_path is not None:
         record_path.parent.mkdir(parents=True, exist_ok=True)
@@ -227,16 +241,19 @@ def fit_placements(board: Board, wanted: list[Place], out_path: Path, sheetfile:
     return positions, notes
 
 
-def _fit_search(board: Board, model, boxes: dict[str, Rect], p: Place, fp: Footprint, centre: Point, radius: float, step: float = 0.5) -> Point | None:
-    """The nearest grid point around ``centre`` where ``p`` keeps the placement rules and the copper clearances."""
+def _fit_search(board: Board, model, boxes: dict[str, Rect], p: Place, fp: Footprint, centre: Point, radius: float, step: float = 0.5,
+                *, seed: Point | None = None) -> Point | None:
+    """The grid point nearest ``seed`` (default ``centre``), within ``radius`` of ``centre``, where ``p`` keeps the placement
+    rules and the copper clearances; the grid runs through ``seed``."""
     from . import copper
 
+    seed = centre if seed is None else seed
     x0, y0, x1, y1 = board.rect()
     m = board.edge_margin
-    n = int(radius / step)
-    cands = [(round(centre[0] + i * step, 3), round(centre[1] + j * step, 3)) for i in range(-n, n + 1) for j in range(-n, n + 1)]
+    n = math.ceil((radius + math.dist(seed, centre)) / step)
+    cands = [(round(seed[0] + i * step, 3), round(seed[1] + j * step, 3)) for i in range(-n, n + 1) for j in range(-n, n + 1)]
     cands = [c for c in cands if math.dist(c, centre) <= radius + 1e-9]
-    cands.sort(key=lambda c: math.dist(c, centre))
+    cands.sort(key=lambda c: (math.dist(c, seed), math.dist(c, centre)))
     rot_eff = (p.rot + 180) % 360 if p.layer == "B.Cu" else p.rot
     for c in cands:
         bb = courtyard_bbox(fp, c, rot_eff)
@@ -278,7 +295,8 @@ def _build(board: Board, out_path: Path, sheetfile: str, netlist: Netlist, symbo
         fp = load_footprint(lib, name)
         path, sheetname, sheetfile_ = symbol_paths[ref]
         pcb.footprint(fp, ref, comp.value or "", at, rot, path=path, sheetname=sheetname, sheetfile=sheetfile_, pad_nets=nets_for(ref), hide_ref=hide_ref,
-                      description=comp.fields.get("Description", ""), datasheet=comp.fields.get("Datasheet", ""), fields=comp.fields, layer=layer)
+                      description=comp.fields.get("Description", ""), datasheet=comp.fields.get("Datasheet", ""), fields=comp.fields, layer=layer,
+                      dnp="dnp" in comp.properties)  # KiCad's netlist lists a DNP symbol's flag as a property
         # a back-side part is mirrored about its X axis and then rotated; for the bounding box that equals the
         # front-side courtyard turned by a further 180 degrees (exact for left-right symmetric parts)
         bb = courtyard_bbox(fp, at, (rot + 180) % 360 if layer == "B.Cu" else rot)
@@ -301,8 +319,10 @@ def _build(board: Board, out_path: Path, sheetfile: str, netlist: Netlist, symbo
         pcb.rounded_rect_outline(*rect, r)
     inset = board.plane_inset
     pour = [(x0 + inset, y0 + inset), (x1 - inset, y0 + inset), (x1 - inset, y1 - inset), (x0 + inset, y1 - inset)]
-    for layer, net, name in board.planes:
-        pcb.zone(net=net, layer=layer, polygon=pour, name=name)
+    for plane in board.planes:
+        pl = plane if isinstance(plane, Plane) else Plane(*plane)
+        extra = {} if pl.clearance is None else {"clearance": pl.clearance}
+        pcb.zone(net=pl.net, layer=pl.layer, polygon=list(pl.polygon) if pl.polygon else pour, name=pl.name, priority=pl.priority, **extra)
     for p in board.placements:
         if isinstance(p, Header):
             header(p.ref, p.at, p.along_x, hide_ref=p.hide_ref)
@@ -310,7 +330,8 @@ def _build(board: Board, out_path: Path, sheetfile: str, netlist: Netlist, symbo
             at, rot = positions.get(p.ref, (p.at, p.rot))
             place(p.ref, at, rot, hide_ref=p.hide_ref, layer=p.layer)
     for t in board.texts:
-        pcb.text(t.text, t.at, size=t.size, thickness=t.thickness, bold=t.bold)
+        justify = tuple(t.justify) + (("mirror",) if t.layer.startswith("B.") and "mirror" not in t.justify else ())
+        pcb.text(t.text, t.at, layer=t.layer, size=t.size, thickness=t.thickness, rot=t.rot, justify=justify or None, bold=t.bold)
 
     missing = sorted(set(comps) - placed)
     if missing:

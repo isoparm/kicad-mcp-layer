@@ -1,7 +1,9 @@
 """Geometry checks on a drawn sheet, before KiCad sees it.
 
 Errors are what KiCad would turn into a wrong netlist or an ERC error: two net names at one
-point, a pin meeting a wire away from the wire's ends with no junction, two symbols on one spot.
+point or on one run of wires (a short between two named nets), a pin meeting a wire away from
+the wire's ends with no junction, two symbols on one spot. A symbol unit is checked with its own
+pins only: a dual opamp's unit 2 pins do not exist on its unit 1.
 Warnings are what only a person would notice: label text running over another symbol's body or
 over another label. Text extents are estimates from the character count.
 """
@@ -57,10 +59,15 @@ def _interior(p: Point, a: Point, b: Point) -> bool:
     return min(a[0], b[0]) - EPS <= p[0] <= max(a[0], b[0]) + EPS and min(a[1], b[1]) - EPS <= p[1] <= max(a[1], b[1]) + EPS
 
 
+def unit_pins(pl: Placed) -> list:
+    """The library pins the placed unit carries: its own and those common to every unit."""
+    return [p for p in pl.symbol.pins if p.unit in (0, pl.unit)]
+
+
 def body_box(pl: Placed) -> Box | None:
     """The symbol body, estimated as the rectangle spanned by the inner ends of its pins."""
     pts = []
-    for p in pl.symbol.pins:
+    for p in unit_pins(pl):
         if pl.rot or pl.mirror:
             pts.append(pl.pin(p.number))  # turned parts are two-pin parts drawn by a rule: their body lies between the pins
         else:
@@ -74,6 +81,37 @@ def body_box(pl: Placed) -> Box | None:
     px = 1.0 if x1 - x0 < EPS else 0.0
     py = 1.0 if y1 - y0 < EPS else 0.0
     return (x0 - px, y0 - py, x1 + px, y1 + py)
+
+
+def _joined_names(names_at: dict[Point, set[str]], wires: list[tuple[Point, Point]], junctions: set[Point],
+                  labels: list[Point]) -> list[tuple[set[str], Point]]:
+    """Groups of points KiCad joins (wire ends, and a junction or a label on a wire's run) that carry more than one
+    net name (labels and power symbols), with one point of each group; PWR_FLAGs carry no name."""
+    parent: dict[Point, Point] = {}
+
+    def find(p: Point) -> Point:
+        parent.setdefault(p, p)
+        while parent[p] != p:
+            parent[p] = parent[parent[p]]
+            p = parent[p]
+        return p
+
+    def union(a: Point, b: Point) -> None:
+        parent[find(a)] = find(b)
+
+    taps = junctions | {_key(p) for p in labels}
+    for a, b in wires:
+        union(_key(a), _key(b))
+        for t in taps:
+            if _interior(t, a, b):
+                union(t, _key(a))
+    groups: dict[Point, set[str]] = {}
+    first: dict[Point, Point] = {}
+    for pt, names in sorted(names_at.items()):
+        root = find(pt)
+        groups.setdefault(root, set()).update(names)
+        first.setdefault(root, pt)
+    return [(names, first[root]) for root, names in groups.items() if len(names) > 1]
 
 
 def lint(sch: SchematicBuilder) -> tuple[list[str], list[str]]:
@@ -111,12 +149,17 @@ def lint(sch: SchematicBuilder) -> tuple[list[str], list[str]]:
             terminals[_key(pl.at)] = terminals.get(_key(pl.at), 0) + 1
         else:
             parts.append(pl)
-            for p in pl.symbol.pins:
+            for p in unit_pins(pl):
                 terminals[_key(pl.pin(p.number))] = terminals.get(_key(pl.pin(p.number)), 0) + 1
 
+    reported: set[frozenset[str]] = set()
     for pt, names in sorted(names_at.items()):
         if len(names) > 1:
             errors.append(f"{' and '.join(sorted(names))} meet at {pt}")
+            reported.add(frozenset(names))
+    for names, where in _joined_names(names_at, wires, junctions, [at for _, at, _, _ in labels]):
+        if frozenset(names) not in reported:
+            errors.append(f"{' and '.join(sorted(names))} are joined by wires (at {where}): a short between two named nets")
     seen: dict[tuple[Point, int], str] = {}
     for pl in sch.placed:
         key = (_key(pl.at), pl.rot)
@@ -125,7 +168,7 @@ def lint(sch: SchematicBuilder) -> tuple[list[str], list[str]]:
         else:
             seen[key] = pl.ref
     for pl in parts:
-        for p in pl.symbol.pins:
+        for p in unit_pins(pl):
             end = pl.pin(p.number)
             if terminals.get(_key(end), 0) > 1:
                 continue  # something ends here: the pin is connected to that, whatever else passes through

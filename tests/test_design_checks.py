@@ -59,6 +59,22 @@ def test_lint_rejects_two_net_names_at_one_point():
     assert errors == ["A and GND meet at (10.16, 10.16)"]
 
 
+def test_lint_rejects_two_net_names_joined_by_wires():
+    sch = sheet()
+    sch.power("+12V", (25.4, 25.4))
+    sch.wire((25.4, 25.4), (25.4, 30.48))
+    sch.label("SIG", (25.4, 27.94))  # a label on the wire's run joins it too
+    sch.power("GND", (25.4, 30.48))
+    errors, _ = lint(sch)
+    assert errors == ["+12V and GND and SIG are joined by wires (at (25.4, 25.4)): a short between two named nets"]
+    sch = sheet()
+    sch.power("+12V", (25.4, 25.4))
+    sch.wire((25.4, 25.4), (25.4, 30.48))
+    sch.wire((22.86, 27.94), (27.94, 27.94))  # crossing without a junction: not joined
+    sch.power("GND", (22.86, 27.94))
+    assert lint(sch)[0] == []
+
+
 def test_lint_rejects_a_pin_on_a_wire_without_a_junction():
     sch = sheet()
     r = place_part(sch, "R1", catalog.R_1K, (25.4, 25.4))

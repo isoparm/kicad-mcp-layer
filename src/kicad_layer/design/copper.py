@@ -3,8 +3,10 @@
 The model holds every pad (circle, capsule, rectangle or rounded rectangle, on its layers), every
 hole, via and track, and the board edge with its cut-outs, in a bucket index. Clearances come from
 the project's net classes and rules, the way KiCad's DRC applies them: the larger of the two nets'
-class clearances between copper, ``min_hole_clearance`` from copper to a hole, ``min_hole_to_hole``
-between holes, ``min_copper_edge_clearance`` to the edge. Questions (``inspect`` answers them)::
+class clearances between copper (raised by a ``clearance`` rule of the project's ``.kicad_dru`` that
+names the two nets), ``min_hole_clearance`` from copper to a hole, ``min_hole_to_hole`` between
+holes, ``min_copper_edge_clearance`` to the edge; a ``disallow via`` or ``disallow track`` rule keeps
+that copper off the nets it names. Questions (``inspect`` answers them)::
 
     region X0 Y0 X1 Y1 [LAYER]             what is there: pads, tracks, vias, holes, edge, per layer
     free REF X Y [ROT]                      would footprint REF fit at (X, Y, ROT): courtyards, edge, copper under its pads
@@ -26,6 +28,7 @@ from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 
+from kicad_layer import dru
 from kicad_layer.review import BoardModel, FpGeo, PadGeo
 from kicad_layer.sexpr import child, children, parse, tag
 
@@ -107,7 +110,8 @@ def rotate(x: float, y: float, angle: float) -> tuple[float, float]:
 # ---------------------------------------------------------------- rules
 @dataclass
 class Rules:
-    """What the project file says: net classes with their patterns, and the board-wide minimums."""
+    """What the project file says: net classes with their patterns, the board-wide minimums, and the custom rules of
+    the ``.kicad_dru`` beside it (disallowed vias and tracks, clearances and track widths per net class or net name)."""
 
     classes: dict[str, dict] = field(default_factory=dict)
     patterns: list[tuple[str, str]] = field(default_factory=list)  # (class, pattern) in order
@@ -115,11 +119,17 @@ class Rules:
     hole: float = 0.25
     hole_to_hole: float = 0.25
     default_clearance: float = 0.2
+    min_track: float = 0.0  # the board's min_track_width
+    custom: list[dru.Rule] = field(default_factory=list)  # the .kicad_dru rules
     _memo: dict = field(default_factory=dict, repr=False)
 
     @classmethod
-    def load(cls, pro: Path | None) -> "Rules":
+    def load(cls, pro: Path | None, dru_path: Path | None = None) -> "Rules":
+        """From the project file and the ``.kicad_dru`` of the same name (or ``dru_path``); absent files give defaults."""
         r = cls()
+        if dru_path is None and pro is not None:
+            dru_path = pro.with_suffix(".kicad_dru")
+        r.custom = dru.load_rules(dru_path)
         if pro is None or not pro.is_file():
             return r
         data = json.loads(pro.read_text(encoding="utf-8"))
@@ -131,6 +141,7 @@ class Rules:
         r.edge = float(rules.get("min_copper_edge_clearance", r.edge))
         r.hole = float(rules.get("min_hole_clearance", r.hole))
         r.hole_to_hole = float(rules.get("min_hole_to_hole", r.hole_to_hole))
+        r.min_track = float(rules.get("min_track_width", r.min_track) or 0.0)
         d = r.classes.get("Default", {})
         r.default_clearance = float(d.get("clearance", rules.get("min_clearance", r.default_clearance)) or r.default_clearance)
         return r
@@ -144,20 +155,43 @@ class Rules:
                 return self.classes.get(name, self.classes.get("Default", {}))
         return self.classes.get("Default", {})
 
+    def facts(self, net: str | None, kind: str | None = None) -> dru.Facts:
+        """What a .kicad_dru condition may ask of an item of ``net``: the net, its class name, KiCad's item type."""
+        return dru.Facts(net=net, netclass=str(self.netclass(net).get("name", "Default")), type=kind)
+
     def clearance(self, net: str | None) -> float:
         if net not in self._memo:
             self._memo[net] = float(self.netclass(net).get("clearance", self.default_clearance) or self.default_clearance)
         return self._memo[net]
 
     def between(self, a: str | None, b: str | None) -> float:
-        return max(self.clearance(a), self.clearance(b))
+        """The larger class clearance, raised by any custom clearance rule that surely applies to the two nets."""
+        key = ("between", a, b)
+        if key not in self._memo:
+            base = max(self.clearance(a), self.clearance(b))
+            extra = dru.min_of(self.custom, "clearance", self.facts(a), self.facts(b)) if self.custom else None
+            self._memo[key] = max(base, extra or 0.0)
+        return self._memo[key]
+
+    def disallowed(self, what: str, net: str | None) -> str | None:
+        """Why a ``via`` or ``track`` of ``net`` breaks a custom rule, or None. A disallow rule whose condition this model
+        cannot evaluate (an area, a footprint) counts as applying: the copper is left to the author."""
+        words = dru.VIA_WORDS if what == "via" else (what,)
+        hits = dru.disallowing(self.custom, words, self.facts(net, "Via" if what == "via" else "Track"))
+        if not hits:
+            return None
+        rule, sure = hits[0]
+        return f"rule {rule.name!r} disallows a {what} on {net}" + ("" if sure else " (condition not evaluated here, taken as applying)")
 
     def via(self, net: str | None) -> tuple[float, float]:
         c = self.netclass(net)
         return float(c.get("via_diameter", 0.6) or 0.6), float(c.get("via_drill", 0.3) or 0.3)
 
     def track(self, net: str | None) -> float:
-        return float(self.netclass(net).get("track_width", 0.2) or 0.2)
+        """The class track width, at least the board's minimum and any custom ``track_width`` minimum for the net."""
+        w = float(self.netclass(net).get("track_width", 0.2) or 0.2)
+        custom = dru.min_of(self.custom, "track_width", self.facts(net, "Track")) if self.custom else None
+        return max(w, self.min_track, custom or 0.0)
 
 
 # ---------------------------------------------------------------- the model
@@ -527,6 +561,9 @@ def clear(model: Model, net: str, layer: str, pts: list[tuple[float, float]], wi
         return [f"{layer} is not a copper layer of this board ({', '.join(model.copper)})"]
     width = width or model.rules.track(net)
     out = [f"track {net} on {layer}, width {width:g}, {len(pts) - 1} segment(s)"]
+    why = model.rules.disallowed("track", net)
+    if why:
+        return out[:1] + [f"NO: {why}"]
     worst: tuple[float, float, Item] | None = None
     bad = 0
     for k, (a, b) in enumerate(zip(pts, pts[1:]), start=1):
@@ -570,6 +607,9 @@ def clear_via(model: Model, net: str, x: float, y: float, size: float | None = N
     dsize, ddrill = model.rules.via(net)
     size, drill = size or dsize, drill or ddrill
     out = [f"via {net} at ({x}, {y}), {size:g}/{drill:g}"]
+    why = model.rules.disallowed("via", net)
+    if why:
+        return out + [f"NO: {why}"]
     if not model.inside_outline(x, y):
         return out + ["NO: outside the board outline"]
     v = model.check_circle(net, model.copper, x, y, size / 2) + model.check_circle(net, model.copper, x, y, drill / 2, is_hole=True)

@@ -27,15 +27,16 @@ SECTIONS: list[tuple[str, str, list[str] | None]] = [
     ("signals", "Signals", ["Signal", "by_sheet", "check_table"]),
     ("render", "Layouts", ["Layout", "At", "Beside", "Decouple", "Flow", "Described", "render"]),
     ("module_sheet", "Module sheets", ["ModuleSheet", "PowerGroup", "DescribedModule"]),
-    ("board", "The board", ["Board", "Place", "Header", "Keepout", "Text", "check_placement", "build_board"]),
+    ("board", "The board", ["Board", "Place", "Header", "Keepout", "Text", "Plane", "check_placement", "build_board"]),
     ("project", "The project", ["Project", "Review", "RootLayout", "Rules", "write_project_file"]),
     ("blocks", "Blocks on a hand-made board", ["Block", "apply", "place"]),
     ("seed", "The first import of a hand-made board", ["Pile", "pack", "seed_board"]),
     ("compare", "Comparing with a reference design, pad for pad", ["compare", "load", "Report", "Row", "Node", "main"]),
     ("copper", "Copper questions: what is there, does a part fit, does a track or via clear", ["Model", "Rules", "Item", "region", "free", "spots", "clear", "clear_via", "load"]),
     ("stubs", "Stub routing of the open connections on single-ended nets", ["route_stubs", "open_connections", "Open", "Result", "main"]),
-    ("rules", "Rule sets", ["jlcpcb_4l", "aisler_4l", "merge_design_rules", "STANDARD_CLASSES", "AISLER_CLASSES", "TRACK_WIDTHS", "VIA_DIMENSIONS", "DIFF_PAIR_DIMENSIONS"]),
-    ("build", "The build", ["main"]),
+    ("rules", "Rule sets", ["jlcpcb_4l", "jlcpcb_2l", "aisler_4l", "merge_design_rules", "SILK_WARNINGS", "JLCPCB_2L", "JLCPCB_2L_CLASSES", "STANDARD_CLASSES", "AISLER_CLASSES", "TRACK_WIDTHS", "VIA_DIMENSIONS", "DIFF_PAIR_DIMENSIONS"]),
+    ("build", "The build", ["main", "symbol_paths"]),
+    ("offline", "Offline builds: the netlist from the descriptions", ["synth_netlist"]),
     ("verify", "Checks with kicad-cli, KiCad closed", ["check_sheet", "check_module", "compare"]),
     ("fab", "Fabrication package", ["main", "pcbway_package"]),
     ("preview", "Previews", None),
@@ -51,7 +52,8 @@ source file only to change the library.
 
 A board is data on `kicad_layer.design`: a signal table, one `Circuit` and one `Layout` per sheet,
 a `ModuleSheet` for the module, a `Board` of placements, a `Project`. The build writes the KiCad
-files; KiCad's ERC and DRC are the tests. `examples/hello_world` is the smallest complete project.
+files; KiCad's ERC and DRC are the tests. `examples/two_layer_basic` is the smallest complete project on it
+(`examples/hello_world` predates the package and drives the writers directly).
 
 ## A sheet in twelve lines
 
@@ -77,7 +79,8 @@ LAYOUT = Layout()                                                  # plain: rows
 
 `Circuit.check()` runs before drawing: every pin on exactly one net or declared open, every signal of
 the sheet used, nothing else called a signal. A placed `Layout(parts={...})` follows a plan and is
-linted for geometry.
+linted for geometry. A multi-unit symbol is drawn unit by unit: `Layout(parts={"U4": At(...), "U4/B": At(...),
+"U4/C": At(...)})` places a dual opamp's units A, B and its power unit (the flow places any left out).
 
 ## The loop
 
@@ -87,6 +90,7 @@ python <project>/design/build.py --preview Power     # one PNG per named sheet i
 python <project>/design/build.py --sch-only --review  # plus the pad-for-pad comparison with the project's Review reference
 python <project>/design/build.py                     # plus the board and DRC; --reopen / --promote for KiCad
 python <project>/design/build.py --route-stubs       # and route what DRC leaves open on single-ended nets, then build again
+python <project>/design/build.py --offline           # no kicad-cli (or none found): sheets, project, board on the descriptions' netlist; UNVERIFIED
 python -m pytest <project>/tests -q                  # every sheet read back against its description
 python -m kicad_layer.design.inspect <build> parts   # questions about a built board: parts, part, net, pin, classes, drc, unrouted, bbox,
                                                      #   region, free, spots, clear, clear-via (copper geometry with the project's clearances)
@@ -108,7 +112,7 @@ def _sig(fn) -> str:
             s = str(inspect.signature(fn))
         except (TypeError, ValueError):
             return "(...)"
-    s = re.sub(r"(?:kicad_layer\.[\w.]+|typing|collections\.abc|pathlib)\.(\w+)", r"\1", s)  # short type names
+    s = re.sub(r"(?:kicad_layer\.[\w.]+|typing|collections\.abc|pathlib(?:\._\w+)?)\.(\w+)", r"\1", s)  # short type names (3.13: pathlib._local)
     s = re.sub(r"(?<=: )'([^']+)'|(?<=-> )'([^']+)'", lambda m: m.group(1) or m.group(2), s)  # unevaluated annotations lose their quotes
     s = s.replace("(self, ", "(").replace("(self)", "()")
     return re.sub(r"\s+", " ", s)
