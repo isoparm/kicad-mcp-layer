@@ -24,6 +24,10 @@ adds the schematic and board edit tools and the frozen routers.
 | `pcb_summary` | core | ipc | read-only | The open board: title block, layers, outline size, counts, stackup, netclass rules |
 | `pcb_list_items` | core | ipc | read-only | Footprints, pads, tracks, vias, zones, nets or text of the open board, filtered and paged |
 | `pcb_net_stats` | core | ipc | read-only | Per-net length, widths, layers, vias, pads, unrouted hints and differential-pair candidates |
+| `pcb_copper_query` | core | file | read-only | Would a track, via or part keep every clearance (net classes, `.kicad_dru`, holes, edge) and what it would hit; what is in a rectangle; where a part fits |
+| `zone_islands` | core | file | read-only | Each zone net's copper in connected groups: detached islands with their pads, area and place; dead copper counted |
+| `pcb_parity` | core | cli, file | read-only | Board against schematic pin by pin: missing or extra footprints, a pin with no pad (`S1` vs `SH`), a pad with no pin, the net on each side |
+| `pcb_plot` | core | file | artifacts | 2-D plot of a board region: real track widths, pads, vias, fills, courtyards, chosen nets highlighted; returned as an image |
 | `lib_search` | core | file | read-only | Full-text search over every symbol and footprint library in KiCad's tables |
 | `sym_info` | core | file | read-only | One library symbol: pins with types, units, filters, matching footprints, datasheet |
 | `fp_info` | core | file | read-only | One library footprint: pads with geometry, mount type, courtyard size, 3D model |
@@ -48,8 +52,12 @@ adds the schematic and board edit tools and the frozen routers.
 | `pcb_save` | full | ipc | design write | Ask KiCad to save the open board |
 | `pcb_move_footprints` | full | ipc or file | design write | Move, rotate or flip several footprints in one write or one undo step |
 | `pcb_set_outline` | full | file | design write | The board outline on Edge.Cuts from a rectangle or polygon, corners rounded with tangent arcs |
-| `pcb_add_mounting_holes` | full | file | design write | Mounting holes as board-only footprints, plated on a net or bare NPTH |
-| `review_board` | core | cli | read-only | DRC, unrouted, zone fills, off-board parts, fab limits, power track widths, stitching, decoupling |
+| `pcb_add_mounting_holes` | full | file | design write | Mounting holes as board-only footprints, plated on a net or bare NPTH; KiCad's own footprint for stock M2 to M6 holes |
+| `pcb_set_track_width` | full | file | design write | Widen tracks of nets or classes to a width or each net's minimum, segment by segment, only where clearance allows; the rest listed |
+| `pcb_swap_footprint` | full | file | design write | Replace a footprint with a library one in place, keeping position, side, fields, schematic link and pad nets |
+| `pcb_silk_tidy` | full | file | design write | Place every reference on the top silkscreen clear of pads, silkscreen, other references and the edge |
+| `fp_create` | full | file | design write | A footprint from a datasheet land pattern (pads, body, courtyard, pin 1) into a project library, registered in its fp-lib-table |
+| `review_board` | core | cli | read-only | DRC, unrouted, zone fills, off-board parts, fab limits, and the layout rules: via in pad, test points, thermal pads, fast nets at the edge, stitching, switcher hot loop, diff pairs, power tracks by current, antenna keep-out, decoupling, reference plane |
 | `review_schematic` | core | cli | read-only | ERC, footprints, values, annotation, power sources, decoupling, BOM summary, SPICE status |
 | `review_project` | core | cli | read-only | Both reviews in one report with one verdict |
 | `doc_fetch` | core | builtin | writes artifacts | Download a datasheet or reference document into the indexed documentation library |
@@ -65,8 +73,9 @@ adds the schematic and board edit tools and the frozen routers.
 | `parts_search` | core | builtin | read-only | JLCPCB assembly catalogue: LCSC code, stock, basic part flag, price |
 | `route_pairs` | full | file | writes artifacts | Route the differential pairs as coupled pairs (escapes, heading-aware search, crossovers, tuning) into a routes JSON |
 | `stitch_planes` | full | file | writes artifacts | A stub and via from every surface-mount pad on a plane net to its plane, only where the plane has copper under the via, into the routes JSON |
-| `autoroute` | full | builtin | writes artifacts | FreeRouting for the rest, existing copper protected; session merged into the routes JSON |
-| `job_start` | core | builtin | runs the tool it names | Run `autoroute`, `run_drc`, `run_erc`, `pcb_refill_zones`, `render_board` or `review_board` in the background; returns a job id at once |
+| `autoroute` | full | builtin | writes artifacts | FreeRouting for the rest, existing copper protected; session merged into the routes JSON without duplicates, necks widened where room allows, pours left to refill |
+| `route_net` | full | file | writes artifacts | One connection by grid A* over the board's copper with every step checked against the rules; layer costs and nets not to run under; routes JSON, written to the board with `apply` |
+| `job_start` | core | builtin | runs the tool it names | Run `autoroute`, `run_drc`, `run_erc`, `pcb_refill_zones`, `render_board`, `review_board`, `route_net` or `pcb_silk_tidy` in the background; returns a job id at once |
 | `job_status` | core | builtin | read-only | A job's state, elapsed time, output tail and FreeRouting's pass, unrouted and violation counts; `wait_s` blocks up to 50 s |
 | `job_result` | core | builtin | read-only | The finished job's normal tool result; a failed job raises the tool's error |
 
@@ -100,9 +109,11 @@ KiCad stores in board coordinates; `pcb_move_footprint` does the same. Flipping 
 The outline is a rectangle `[x0, y0, x1, y1]` or a polygon; with `corner_radius_mm` every corner becomes a
 tangent arc written the KiCad 10 way, `(gr_arc (start) (mid) (end))`, and the lines are shortened to meet
 it, so the outline stays one closed chain (a radius that does not fit an edge is refused). `replace`
-(default) removes the board's own Edge.Cuts drawings first. A mounting hole is an inline footprint
-`MountingHole:MountingHole_<drill>mm[_Pad]` with `(attr board_only exclude_from_pos_files exclude_from_bom)`:
-plated, with pad number 1 on `net`, when `pad` exceeds the drill, otherwise a bare NPTH. References default
+(default) removes the board's own Edge.Cuts drawings first. A bare hole of a stock size (2.2, 2.7, 3.2,
+4.3, 5.3, 6.4 mm: M2 to M6) is KiCad's own `MountingHole:MountingHole_<drill>mm_M<n>`, so DRC's library check finds it
+identical. Any other hole is an inline footprint `MountingHole_<drill>mm[_Pad]` with no library link (DRC does not
+compare it) and `(attr board_only exclude_from_pos_files exclude_from_bom)`: plated, with pad number 1 on `net`, when
+`pad` exceeds the drill, otherwise a bare NPTH. References default
 to the next free `H<n>`.
 
 KiCad finds a board's rules by the board's name only: net classes and constraints in
@@ -113,6 +124,13 @@ default design rules`), and so does a `.kicad_dru` in the board's folder under a
 copy-with-rename mistake: its rules exist and are not applied). `pcb_refill_zones` refuses with
 `PROJECT_NOT_FOUND` in both cases, since a fill against the wrong clearances is saved into the board;
 `allow_default_rules: true` fills anyway and keeps the warning.
+
+`pcb_set_track_width`, `pcb_swap_footprint` and `pcb_silk_tidy` also work on the file only. Each change is checked
+against the copper model of the design package (`design/copper.py`: net-class clearances raised by the `.kicad_dru`,
+hole and edge clearances) before it is made; a segment that would collide keeps its width and is reported with what it
+would hit. `route_net` reads the same model: a grid A* (0.25 mm, eight directions, vias where the rules allow) whose
+every step keeps every clearance; `layer_cost` makes a layer dearer (keep a two-layer board's ground plane whole) and
+`keep_under` makes running beneath the named nets on the other layer dear, so a crossing comes out square and short.
 
 ## Design writes
 

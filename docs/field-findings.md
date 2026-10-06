@@ -502,3 +502,26 @@ template, with no test fixture behind it. OPEN: the catalogue (`catalog.py`) is 
 **Fix:** a small `examples/` project on `Circuit` + `Layout` + `Board` + `Project` (notch_board's header and power
 sheets would do). Ship a KiCad-authored 2- and 4-layer template under `src/kicad_layer/design/templates/`, and
 move the CM5 catalogue into that board's repository.
+
+# Field findings: Human Kinetik v0.5
+
+Date: 2026-10-05. Source: placing and routing the Human Kinetik v0.5 board (2 layers, 136 parts, USB, buck,
+class-D amplifiers) through this server on Windows with KiCad 10. All were fixed the same week; each fix has a
+test (`tests/test_layout_rules.py`, `tests/test_board_tools.py`).
+
+| # | Severity | Finding | Fix and test |
+|---|---|---|---|
+| 21 | high | No way to ask whether a track or via fits before writing it; every attempt was write, DRC, undo | `pcb_copper_query`; `test_copper_query_clear_and_region` |
+| 22 | high | `autoroute` turned pours of excluded nets into keep-outs, so whole areas were unroutable although a refill would move the pour | `pours_as_keepouts=False` by default; `test_a_pour_refills_so_by_default_it_is_no_obstacle` |
+| 23 | high | FreeRouting necked power tracks below the class width and laid copper over existing tracks | `widen_necks`, duplicate copper dropped; `test_autoroute_drops_existing_copper_and_widens_necks` |
+| 24 | high | No router for one connection: fixing a single net after a review meant FreeRouting on the whole board or a hand-written path | `route_net`; `test_route_net_goes_around_and_crosses_short` |
+| 25 | medium | `review_board` false positives: via ring judged by the PTH rule, copper to edge from the bounding box, a USB connector's shell flagged off board, speaker `_P/_N` taken as a diff pair, decoupling missed when the IC's supply pins are passive | `test_via_ring_uses_the_fabs_via_rule`, `test_copper_to_edge_is_measured_on_the_edge_not_its_box`, `test_edge_connector_overhang_is_info`, `test_usb_pair_found_and_speaker_skipped`, `test_decoupling_falls_back_to_supply_names_and_checks_the_ground_via` |
+| 26 | medium | `run_drc` gave no way to see only one violation type or page a long list; DRC parity said "mismatch" without naming what | `types`, `offset`, `save_report`; `pcb_parity`; `test_drc_types_and_offset`, `test_parity_names_the_pin_without_a_pad` |
+| 27 | medium | Isolated fill islands were found only by looking at renders | `zone_islands`; `test_zone_islands_names_the_detached_pads` |
+| 28 | medium | Missing edits: track width per net, footprint swap keeping the nets, silkscreen tidy, a new footprint from a pad list | `pcb_set_track_width`, `pcb_swap_footprint`, `pcb_silk_tidy`, `fp_create`; their tests |
+| 29 | low | `render_board` with a relative output folder wrote into the folder twice nested; mounting holes added inline drew `lib_footprint_mismatch` | `relative_target`; library mounting holes; `test_relative_output_paths_are_not_doubled`, `test_stock_mounting_hole_comes_from_the_library` |
+| 30 | low | No 2-D view of a few layers around one part; full renders cost a thousand tokens each | `pcb_plot`; `test_plot_writes_a_png` |
+
+The layout review (via in pad, test points, thermal pads, fast signals at the edge, stitching, switcher loop,
+power tracks against current, antenna keep-out, reference plane) came from the author's layout rules list;
+on this board it found three vias in capacitor pads, which were moved.

@@ -910,3 +910,81 @@ class JobResult(BaseModel):
     elapsed_s: float | None = None
     result: Any = Field(default=None, description="The tool's normal result once done: its structured output, or {'text': [...]} for a tool without one.")
     hint: str | None = None
+
+
+# --------------------------------------------------------------------------------------
+# board questions, islands, parity, routing one net, footprints made from numbers
+# --------------------------------------------------------------------------------------
+
+
+class CopperQuery(BaseModel):
+    question: Literal["region", "clear", "clear_via", "free", "spots"]
+    board: str
+    ok: bool = Field(description="clear/clear_via: every clearance kept. free: the part fits. spots: at least one place found. region: always true.")
+    lines: list[str] = Field(default_factory=list, description="The answer, one line per item or violation, distances in mm.")
+    rules: str = Field(default="", description="Where the clearances came from: the project's net classes and .kicad_dru.")
+
+
+class IslandGroup(BaseModel):
+    pads: list[str] = Field(default_factory=list, description="REF.PAD of the pads in this group.")
+    rings: int = Field(description="Zone fill polygons in this group.")
+    area_mm2: float
+    layers: list[str] = Field(default_factory=list)
+    x_mm: float | None = None
+    y_mm: float | None = None
+
+
+class NetIslands(BaseModel):
+    net: str
+    groups: int = Field(description="Connected groups of this net's copper; 1 means fully joined.")
+    main: IslandGroup
+    detached: list[IslandGroup] = Field(default_factory=list, description="Groups not joined to the main one: each needs a track or via, or is dead copper.")
+
+
+class ZoneIslands(BaseModel):
+    board: str
+    nets: list[NetIslands]
+    dead_copper: int = Field(description="Fill polygons that touch no pad, via or track of their net.")
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ParityIssue(BaseModel):
+    kind: Literal["missing_footprint", "extra_footprint", "pin_without_pad", "pad_without_pin", "net_mismatch", "footprint_mismatch", "value_mismatch"]
+    ref: str
+    pin: str | None = None
+    schematic: str | None = Field(default=None, description="What the schematic says (net, footprint, value).")
+    board: str | None = Field(default=None, description="What the board says.")
+    hint: str | None = None
+
+
+class ParityReport(BaseModel):
+    board: str
+    schematic: str
+    components: int
+    footprints: int
+    issues: list[ParityIssue]
+    summary: dict[str, int] = Field(default_factory=dict)
+
+
+class RouteNetReport(BaseModel):
+    board: str
+    net: str
+    status: Literal["routed", "failed"]
+    length_mm: float = 0.0
+    vias: int = 0
+    segments: int = 0
+    layers: list[str] = Field(default_factory=list)
+    routes_path: str | None = Field(default=None, description="Routes JSON with the new copper (segments and vias by net).")
+    applied: bool = Field(default=False, description="True when the copper was written into the board file.")
+    crossings_under: list[str] = Field(default_factory=list, description="Nets of keep_under whose copper this route passes beneath, with the length.")
+    nodes: int = 0
+    notes: list[str] = Field(default_factory=list)
+
+
+class FootprintCreated(BaseModel):
+    lib_id: str
+    path: str
+    pads: int
+    courtyard_mm: list[float] = Field(description="[x0, y0, x1, y1] of the courtyard in the footprint's frame.")
+    table: str | None = Field(default=None, description="The fp-lib-table the library was registered in, when it was added.")
+    warnings: list[str] = Field(default_factory=list)

@@ -212,6 +212,8 @@ def _build(
     *,
     summary: bool = False,
     top: int = SUMMARY_TOP,
+    types: list[str] | None = None,
+    offset: int = 0,
 ) -> VerdictReport:
     notes: list[str] = []
     if result.returncode not in (runner.EXIT_OK, runner.EXIT_VIOLATIONS):
@@ -243,6 +245,14 @@ def _build(
     findings, parse_notes = parse(data)
     notes.extend(parse_notes)
     verdict, counts = summarize(findings)
+    if types:
+        wanted = {t.lower() for t in types}
+        kept = [f for f in findings if f.type.lower() in wanted or f.category in wanted]
+        notes.append(f"Filtered to {', '.join(sorted(wanted))}: {len(kept)} of {len(findings)} findings; counts and verdict cover them all.")
+        findings = kept
+    if offset:
+        notes.append(f"Listing from finding {offset} of {len(findings)}.")
+        findings = findings[offset:]
     digest = None
     if summary:
         digest = summarize_findings(findings, top)
@@ -274,7 +284,20 @@ def _build(
     )
 
 
-def run_erc(root_schematic: Path, *, severity: Severity = "all", summary: bool = False, top: int = SUMMARY_TOP) -> VerdictReport:
+def save_copy(report: VerdictReport, target: Path) -> None:
+    """Copy the JSON report next to the design (e.g. reports/<name>-drc.json) and point report_path at the copy."""
+    import shutil
+
+    if not report.report_path:
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(report.report_path, target)
+    report.notes.append(f"Report copied to {display(target)}.")
+    report.report_path = str(target)
+
+
+def run_erc(root_schematic: Path, *, severity: Severity = "all", summary: bool = False, top: int = SUMMARY_TOP, types: list[str] | None = None,
+            offset: int = 0, save_report: bool = False) -> VerdictReport:
     cli = find_kicad_cli()
     report_path = _report_path("erc", root_schematic)
     report_path.unlink(missing_ok=True)
@@ -288,7 +311,10 @@ def run_erc(root_schematic: Path, *, severity: Severity = "all", summary: bool =
         root_schematic,
     ]
     result = runner.run(cmd, timeout_s=settings().cli_long_timeout_s, cwd=root_schematic.parent)
-    return _build("erc", root_schematic, result, report_path, parse_erc, summary=summary, top=top)
+    report = _build("erc", root_schematic, result, report_path, parse_erc, summary=summary, top=top, types=types, offset=offset)
+    if save_report:
+        save_copy(report, root_schematic.parent / "reports" / f"{root_schematic.stem}-erc.json")
+    return report
 
 
 def run_drc(
@@ -299,6 +325,9 @@ def run_drc(
     all_track_errors: bool = False,
     summary: bool = False,
     top: int = SUMMARY_TOP,
+    types: list[str] | None = None,
+    offset: int = 0,
+    save_report: bool = False,
 ) -> VerdictReport:
     cli = find_kicad_cli()
     report_path = _report_path("drc", board)
@@ -317,8 +346,12 @@ def run_drc(
     cmd += ["-o", report_path, board]
     started = time.monotonic()
     result = runner.run(cmd, timeout_s=settings().cli_long_timeout_s, cwd=board.parent)
-    report = _build("drc", board, result, report_path, parse_drc, summary=summary, top=top)
+    report = _build("drc", board, result, report_path, parse_drc, summary=summary, top=top, types=types, offset=offset)
     report.warnings = board_rule_warnings(board)
+    if report.counts.get("parity"):
+        report.notes.append("Schematic parity findings: pcb_parity lists them pin by pin (a symbol pin with no pad, a pad no pin names, the net on each side).")
+    if save_report:
+        save_copy(report, board.parent / "reports" / f"{board.stem}-drc.json")
     if report.duration_s is None:
         report.duration_s = round(time.monotonic() - started, 3)
     return report

@@ -77,7 +77,8 @@ def test_off_board_and_dfm_without_kicad(workspace):
 def test_review_board_fixture(workspace):
     rep = review.review_board(FIXTURES / "pic_programmer" / "pic_programmer.kicad_pcb", fab="jlcpcb")
     ids = [c.id for c in rep.checks]
-    assert ids == ["board", "drc", "unrouted", "zone_fills", "off_board", "dfm", "power_tracks", "stitching", "decoupling", "diff_pairs"]
+    assert ids == ["board", "drc", "unrouted", "zone_fills", "off_board", "dfm", "via_in_pad", "test_points", "thermal_pads", "fast_edge", "stitching",
+                   "switcher_loop", "power_tracks", "antenna", "plane_reference", "decoupling", "diff_pairs"]
     by = {c.id: c for c in rep.checks}
     assert by["drc"].verdict == "PASS" and by["unrouted"].verdict == "PASS"
     assert rep.verdict in ("PASS", "WARN")

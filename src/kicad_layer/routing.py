@@ -2,7 +2,7 @@
 
 What this module knows how to do:
 
-* **Find pairs by name.** ``X_P``/``X_N``, ``X_DP``/``X_DN``, ``X+``/``X-`` and ``XP``/``XN`` are
+* **Find pairs by name.** ``X_P``/``X_N``, ``X_DP``/``X_DN``, ``X_DP``/``X_DM`` (USB), ``X+``/``X-`` and ``XP``/``XN`` are
   pairs; hierarchical prefixes (``/CM5/DSI_D0_P``) are kept on the net and stripped from the
   pair's name.
 * **Measure each half.** Routed length is the sum of the net's track segments plus a fixed
@@ -237,7 +237,8 @@ def suggest_geometry(target_ohm: float, stackup: str = "jlc04161h-7628", gap_mm:
 # pairs
 # --------------------------------------------------------------------------------------
 
-PAIR_SUFFIXES: tuple[tuple[str, str], ...] = (("_P", "_N"), ("_DP", "_DN"), ("+", "-"), ("P", "N"))
+# USB names its pair D+/D-, written DP/DM or D_P/D_N on most schematics
+PAIR_SUFFIXES: tuple[tuple[str, str], ...] = (("_P", "_N"), ("_DP", "_DN"), ("_DP", "_DM"), ("D+", "D-"), ("+", "-"), ("P", "N"))
 
 # (regex on the pair's name, target impedance, max intra-pair skew mm, source)
 INTERFACE_RULES: tuple[tuple[str, float, float, str], ...] = (
@@ -274,7 +275,7 @@ def find_pairs(nets: list[str]) -> tuple[list[tuple[str, str, str]], list[str]]:
     for local, net in sorted(by_local.items()):
         if net in used:
             continue
-        if re.search(r"(_P|_N|_DP|_DN)$", local):
+        if re.search(r"(_P|_N|_DP|_DN|_DM)$", local):
             lone.append(net)
     return pairs, lone
 

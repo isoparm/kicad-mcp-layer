@@ -447,6 +447,15 @@ def check_zone_fills(bm: BoardModel) -> ReviewCheck:
                   summary="all zones filled" if not stale else f"{len(stale)} unfilled zone(s): DRC and renders on this file do not show the copper pours")
 
 
+CONNECTOR_REF = re.compile(r"^(J|P|CN|X|USB|CON)\d", re.IGNORECASE)
+
+
+def is_connector(fp: FpGeo) -> bool:
+    """A connector by its library (Connector*, *USB*, terminal blocks, headers) or by its reference prefix."""
+    lib = fp.lib_id.lower()
+    return bool(CONNECTOR_REF.match(fp.ref)) or any(k in lib for k in ("connector", "usb", "terminalblock", "pinheader", "jack", "socket"))
+
+
 def check_off_board(bm: BoardModel) -> ReviewCheck:
     if bm.outline is None:
         return _unverified("off_board", "Footprints inside the outline", "the board has no Edge.Cuts outline")
@@ -456,8 +465,58 @@ def check_off_board(bm: BoardModel) -> ReviewCheck:
         if fp.lib_id.startswith("MountingHole") is False and not (x0 <= fp.x <= x1 and y0 <= fp.y <= y1):
             findings.append(_finding("off_board", "error", f"{fp.ref} at ({fp.x}, {fp.y}) lies outside the outline", ref=fp.ref, x_mm=fp.x, y_mm=fp.y))
         elif fp.courtyard and (fp.courtyard[0] < x0 - 0.01 or fp.courtyard[1] < y0 - 0.01 or fp.courtyard[2] > x1 + 0.01 or fp.courtyard[3] > y1 + 0.01):
-            findings.append(_finding("off_board", "warning", f"{fp.ref}'s courtyard crosses the outline", ref=fp.ref, x_mm=fp.x, y_mm=fp.y))
+            pads_inside = all(x0 <= p.x <= x1 and y0 <= p.y <= y1 for p in fp.pads if p.kind != "np_thru_hole")
+            if is_connector(fp) and pads_inside:
+                findings.append(_finding("off_board", "info", f"{fp.ref} overhangs the outline with its pads inside: an edge-mounted connector, as intended",
+                                         ref=fp.ref, x_mm=fp.x, y_mm=fp.y))
+            else:
+                findings.append(_finding("off_board", "warning", f"{fp.ref}'s courtyard crosses the outline", ref=fp.ref, x_mm=fp.x, y_mm=fp.y))
     return _check("off_board", "Footprints inside the outline", findings, f"outline bbox {x0:.1f},{y0:.1f} to {x1:.1f},{y1:.1f} mm; {len(bm.footprints)} footprints")
+
+
+def copper_to_edge(bm: BoardModel) -> tuple[float, float, float, str, str | None] | None:
+    """The copper nearest the board edge: (distance, x, y, what, net). Tracks as capsules, pads by shape, both against
+    the Edge.Cuts segments themselves (rounded corners and cut-outs included), not the outline's bounding box."""
+    from kicad_layer.design.copper import copper_layers, d_seg_seg, edge_segments, pad_item
+
+    try:
+        edges = edge_segments(bm.path)
+    except (OSError, ValueError, TypeError):
+        edges = []
+    if not edges:
+        return None
+    copper = copper_layers(bm.copper_layers)
+    worst: tuple[float, float, float, str, str | None] | None = None
+
+    def near_edges(bx0, by0, bx1, by1, reach=3.0):
+        return [(a, b) for a, b in edges if min(a[0], b[0]) <= bx1 + reach and max(a[0], b[0]) >= bx0 - reach
+                and min(a[1], b[1]) <= by1 + reach and max(a[1], b[1]) >= by0 - reach]
+
+    for sg in bm.segments:
+        if not sg.layer.endswith(".Cu"):
+            continue
+        cand = near_edges(min(sg.x1, sg.x2), min(sg.y1, sg.y2), max(sg.x1, sg.x2), max(sg.y1, sg.y2))
+        for a, b in cand:
+            d = d_seg_seg((sg.x1, sg.y1), (sg.x2, sg.y2), a, b) - sg.width / 2
+            if worst is None or d < worst[0]:
+                worst = (d, sg.x1, sg.y1, f"track on {sg.layer}", sg.net)
+    for fp in bm.footprints:
+        for p in fp.pads:
+            it = pad_item(p, copper)
+            if it is None:
+                continue
+            for a, b in near_edges(*it.bbox):
+                d = it.distance_to_segment(a, b)
+                if worst is None or d < worst[0]:
+                    worst = (d, p.x, p.y, f"{p.ref} pad {p.number}", p.net)
+    for v in bm.vias:
+        for a, b in near_edges(v.x, v.y, v.x, v.y):
+            from kicad_layer.design.copper import d_pt_seg
+
+            d = d_pt_seg(v.x, v.y, *a, *b) - v.size / 2
+            if worst is None or d < worst[0]:
+                worst = (d, v.x, v.y, "via", v.net)
+    return worst
 
 
 def check_dfm(bm: BoardModel, fab: FabLimits) -> ReviewCheck:
@@ -473,16 +532,19 @@ def check_dfm(bm: BoardModel, fab: FabLimits) -> ReviewCheck:
     if dr_clear is not None and dr_clear < fab.min_space_mm - 1e-6:
         f.append(_finding(cid, "warning", f"project minimum clearance {dr_clear} mm is below the fab's {fab.min_space_mm} mm, so DRC may pass spacing the fab rejects", value=dr_clear, limit=fab.min_space_mm))
     # vias
+    # vias: their own ring rule (the fab's via diameter over drill), not the plated-hole ring of component pads
     for v in bm.vias:
         ring = (v.size - v.drill) / 2
         if v.drill < fab.min_via_drill_mm - 1e-6:
             f.append(_finding(cid, "error", f"via drill {v.drill} mm below {fab.min_via_drill_mm} mm", net=v.net, x_mm=v.x, y_mm=v.y, value=v.drill, limit=fab.min_via_drill_mm))
         elif v.size < fab.min_via_diameter_mm - 1e-6:
             f.append(_finding(cid, "error", f"via diameter {v.size} mm below {fab.min_via_diameter_mm} mm", net=v.net, x_mm=v.x, y_mm=v.y, value=v.size, limit=fab.min_via_diameter_mm))
-        elif ring < fab.abs_min_annular_ring_mm - 1e-6:
-            f.append(_finding(cid, "error", f"via annular ring {ring:.3f} mm below the absolute minimum {fab.abs_min_annular_ring_mm} mm", net=v.net, x_mm=v.x, y_mm=v.y, value=round(ring, 3), limit=fab.abs_min_annular_ring_mm))
-        elif ring < fab.min_annular_ring_mm - 1e-6:
-            f.append(_finding(cid, "warning", f"via annular ring {ring:.3f} mm below the recommended {fab.min_annular_ring_mm} mm", net=v.net, x_mm=v.x, y_mm=v.y, value=round(ring, 3), limit=fab.min_annular_ring_mm))
+        elif ring < fab.abs_min_via_ring_mm - 1e-6:
+            f.append(_finding(cid, "error", f"via annular ring {ring:.3f} mm below the fab's via minimum {fab.abs_min_via_ring_mm} mm (diameter {v.size} for drill {v.drill})",
+                              net=v.net, x_mm=v.x, y_mm=v.y, value=round(ring, 3), limit=fab.abs_min_via_ring_mm))
+        elif ring < fab.min_via_ring_mm - 1e-6:
+            f.append(_finding(cid, "warning", f"via annular ring {ring:.3f} mm below the fab's preferred {fab.min_via_ring_mm} mm", net=v.net, x_mm=v.x, y_mm=v.y,
+                              value=round(ring, 3), limit=fab.min_via_ring_mm))
     # plated through-hole pads
     for fp in bm.footprints:
         for p in fp.pads:
@@ -498,33 +560,29 @@ def check_dfm(bm: BoardModel, fab: FabLimits) -> ReviewCheck:
             gap = math.hypot(a.x - b.x, a.y - b.y) - (a.drill + b.drill) / 2
             if gap < fab.min_via_hole_to_hole_mm - 1e-6:
                 f.append(_finding(cid, "error", f"via holes {gap:.3f} mm apart, below {fab.min_via_hole_to_hole_mm} mm", x_mm=a.x, y_mm=a.y, value=round(gap, 3), limit=fab.min_via_hole_to_hole_mm))
-    # copper to edge (bounding-box estimate)
+    # copper to edge: exact distance to the Edge.Cuts segments (arcs sampled), pads by their real shape
     if bm.outline:
         x0, y0, x1, y1 = bm.outline
-        worst = None
-        for s in bm.segments:
-            for (x, y) in ((s.x1, s.y1), (s.x2, s.y2)):
-                d = min(x - x0, x1 - x, y - y0, y1 - y) - s.width / 2
-                if worst is None or d < worst[0]:
-                    worst = (d, x, y, "track", s.net)
-        for fp in bm.footprints:
-            for p in fp.pads:
-                if "F.Cu" in p.layers or "B.Cu" in p.layers or "*.Cu" in p.layers:
-                    d = min(p.x - x0, x1 - p.x, p.y - y0, y1 - p.y) - max(p.size) / 2
-                    if worst is None or d < worst[0]:
-                        worst = (d, p.x, p.y, f"{p.ref} pad {p.number}", p.net)
+        worst = copper_to_edge(bm)
         if worst and worst[0] < fab.min_copper_to_edge_mm - 1e-6:
-            f.append(_finding(cid, "warning", f"{worst[3]} is about {worst[0]:.2f} mm from the outline's bounding box, fab wants {fab.min_copper_to_edge_mm} mm (estimate; DRC's copper_edge_clearance is exact)",
+            f.append(_finding(cid, "warning", f"{worst[3]} is {worst[0]:.2f} mm from the board edge, fab wants {fab.min_copper_to_edge_mm} mm",
                               net=worst[4], x_mm=worst[1], y_mm=worst[2], value=round(worst[0], 3), limit=fab.min_copper_to_edge_mm))
         w, h = x1 - x0, y1 - y0
         if min(w, h) < fab.min_board_mm:
             f.append(_finding(cid, "error", f"board {w:.1f} x {h:.1f} mm is below the fab's minimum {fab.min_board_mm} mm", value=min(w, h), limit=fab.min_board_mm))
-    # silkscreen text
-    for t in bm.texts:
-        if t.height < fab.min_silk_text_height_mm - 1e-6:
-            f.append(_finding(cid, "warning", f"silkscreen text {t.text!r} height {t.height} mm below {fab.min_silk_text_height_mm} mm; may be unreadable", x_mm=t.x, y_mm=t.y, value=t.height, limit=fab.min_silk_text_height_mm))
-        if t.thickness < fab.min_silk_line_mm - 1e-6:
-            f.append(_finding(cid, "warning", f"silkscreen text {t.text!r} stroke {t.thickness} mm below {fab.min_silk_line_mm} mm", x_mm=t.x, y_mm=t.y, value=t.thickness, limit=fab.min_silk_line_mm))
+    # silkscreen text: one line per problem, the texts listed
+    low = [t for t in bm.texts if t.height < fab.min_silk_text_height_mm - 1e-6]
+    thin = [t for t in bm.texts if t.thickness < fab.min_silk_line_mm - 1e-6]
+    if low:
+        t0 = low[0]
+        f.append(_finding(cid, "warning", f"{len(low)} silkscreen text(s) below {fab.min_silk_text_height_mm} mm high (smallest {min(t.height for t in low):g} mm); may be unreadable",
+                          x_mm=t0.x, y_mm=t0.y, value=min(t.height for t in low), limit=fab.min_silk_text_height_mm,
+                          detail=", ".join(sorted({t.text for t in low})[:30]), count=len(low)))
+    if thin:
+        t0 = thin[0]
+        f.append(_finding(cid, "warning", f"{len(thin)} silkscreen text(s) with a stroke below {fab.min_silk_line_mm} mm (thinnest {min(t.thickness for t in thin):g} mm)",
+                          x_mm=t0.x, y_mm=t0.y, value=min(t.thickness for t in thin), limit=fab.min_silk_line_mm,
+                          detail=", ".join(sorted({t.text for t in thin})[:30]), count=len(thin)))
     if bm.copper_layers > fab.layers:
         f.append(_finding(cid, "warning", f"board has {bm.copper_layers} copper layers; limits applied are for {fab.layers}", value=bm.copper_layers, limit=fab.layers))
     ev = f"{fab.name}; {len(bm.segments)} tracks, {len(bm.vias)} vias, {sum(len(fp.pads) for fp in bm.footprints)} pads, {len(bm.texts)} silk texts"
@@ -557,50 +615,100 @@ def check_via_stitching(bm: BoardModel) -> ReviewCheck:
     return _check("stitching", "Zone stitching vias", f, f"vias per zone net: {data}", summary="every zone net has vias" if not f else f"{len(f)} zone net(s) without vias")
 
 
-def check_decoupling(bm: BoardModel, project, *, warn_mm: float = 5.0, high_mm: float = 8.0) -> ReviewCheck:
-    root = project.root_schematic
-    if root is None:
-        return _unverified("decoupling", "Decoupling capacitor placement", "no schematic next to the board to identify power pins")
-    try:
-        nl = netlist_mod.load_netlist(root, include_components=True, max_nets=5000)
-    except LayerError as exc:
-        return _unverified("decoupling", "Decoupling capacitor placement", f"netlist unavailable: {exc}")
-    power_nets: dict[str, set[str]] = {}   # ic ref -> nets on its power_in pins
-    for net in nl.nets:
-        for node in net.nodes:
-            if node.pin_type == "power_in" and node.ref.startswith("U"):
-                power_nets.setdefault(node.ref, set()).add(net.name)
-    if not power_nets:
-        return _info("decoupling", "Decoupling capacitor placement", "no ICs with power_in pins in the netlist", "kicad-cli netlist pin types")
+def ic_power_nets(bm: BoardModel, project) -> tuple[dict[str, set[str]], str]:
+    """IC reference -> the non-ground supply nets on its pins, and how they were found.
+
+    The netlist's power_in pins come first. Symbols drawn with every pin passive (common in
+    generated libraries) have none, so the fallback reads the board: an IC's pads on nets whose
+    names look like supplies. Either way ground nets are left out."""
+    root = getattr(project, "root_schematic", None)
+    found: dict[str, set[str]] = {}
+    if root is not None:
+        try:
+            nl = netlist_mod.load_netlist(root, include_components=True, max_nets=5000)
+            for net in nl.nets:
+                for node in net.nodes:
+                    if node.pin_type == "power_in" and node.ref.startswith("U") and not re.search(r"GND|VSS", net.name, re.IGNORECASE):
+                        found.setdefault(node.ref, set()).add(net.name)
+        except LayerError:
+            pass
+    if found:
+        return found, "power_in pins from the netlist"
+    for fp in bm.footprints:
+        if not fp.ref.startswith("U"):
+            continue
+        for p in fp.pads:
+            if p.net and POWER_NET.search(p.net) and not re.search(r"GND|VSS", p.net, re.IGNORECASE) and not re.search(r"ADC|SENS|DIV|_FB|FB_|REF|_DET", p.net, re.IGNORECASE):
+                found.setdefault(fp.ref, set()).add(p.net)
+    return found, "IC pads on supply-named nets (the symbols have no power_in pins)"
+
+
+def check_decoupling(bm: BoardModel, project, *, warn_mm: float = 5.0, high_mm: float = 8.0, gnd_via_mm: float = 1.5) -> ReviewCheck:
+    """Rule 10: every IC supply pin has a capacitor close by, pad to pad, and the capacitor's ground pad
+    reaches the ground plane at once (a via within ``gnd_via_mm`` or a ground pour under the pad)."""
+    from kicad_layer.geometry import FillIndex
+
+    name = "Decoupling capacitor placement"
+    power, how = ic_power_nets(bm, project)
+    if not power:
+        return _unverified("decoupling", name, "no IC supply pins identified: no power_in pins in the netlist and no IC pad on a supply-named net",
+                           "netlist pin types and board pad nets")
     pos = {fp.ref: fp for fp in bm.footprints}
-    caps_by_net: dict[str, list[FpGeo]] = {}
+    cap_pads: dict[str, list[PadGeo]] = {}
     for fp in bm.footprints:
         if fp.ref.startswith("C"):
             for p in fp.pads:
                 if p.net:
-                    caps_by_net.setdefault(p.net, []).append(fp)
-    f = []
-    data = {}
-    for ic, nets in sorted(power_nets.items()):
+                    cap_pads.setdefault(p.net, []).append(p)
+    fills = FillIndex.from_zones(bm.zones)
+    gnd_vias = [v for v in bm.vias if v.net and re.search(r"GND|VSS", v.net, re.IGNORECASE)]
+    f: list[ReviewFinding] = []
+    data: dict[str, Any] = {}
+    checked_caps: set[str] = set()
+    for ic, nets in sorted(power.items()):
         ic_fp = pos.get(ic)
         if ic_fp is None:
             continue
         for n in sorted(nets):
-            if re.search(r"GND|VSS", n, re.IGNORECASE):
-                continue
-            caps = caps_by_net.get(n, [])
+            ic_pads = [p for p in ic_fp.pads if p.net == n]
+            caps = cap_pads.get(n, [])
             if not caps:
-                f.append(_finding("decoupling", "warning", f"{ic} power net {n} has no capacitor on it", ref=ic, net=n))
+                f.append(_finding("decoupling", "warning", f"{ic} supply net {n} has no capacitor on it", ref=ic, net=n))
                 continue
-            d = min(math.hypot(c.x - ic_fp.x, c.y - ic_fp.y) for c in caps)
-            nearest = min(caps, key=lambda c: math.hypot(c.x - ic_fp.x, c.y - ic_fp.y)).ref
-            data[f"{ic}:{n}"] = round(d, 2)
+            if not ic_pads:
+                continue
+            d, cp = min(((math.hypot(c.x - q.x, c.y - q.y), c) for c in caps for q in ic_pads), key=lambda t: t[0])
+            data[f"{ic}:{n}"] = {"cap": cp.ref, "mm": round(d, 2)}
             if d > high_mm:
-                f.append(_finding("decoupling", "warning", f"{ic} on {n}: nearest capacitor {nearest} is {d:.1f} mm away (over {high_mm} mm)", ref=ic, net=n, value=round(d, 2), limit=high_mm))
+                f.append(_finding("decoupling", "warning", f"{ic} on {n}: nearest capacitor {cp.ref} is {d:.1f} mm from the pin (over {high_mm} mm)", ref=ic, net=n,
+                                  value=round(d, 2), limit=high_mm, x_mm=cp.x, y_mm=cp.y))
             elif d > warn_mm:
-                f.append(_finding("decoupling", "info", f"{ic} on {n}: nearest capacitor {nearest} is {d:.1f} mm away (over {warn_mm} mm)", ref=ic, net=n, value=round(d, 2), limit=warn_mm))
-    return _check("decoupling", "Decoupling capacitor placement", f, f"power_in pins from the netlist; capacitor distance by footprint origin: {data}",
-                  limit_source="kicad-happy EMC rule DC-001: over 8 mm high, over 5 mm medium", summary="every IC power pin has a capacitor within 5 mm" if not f else f"{len(f)} IC power net(s) to look at")
+                f.append(_finding("decoupling", "info", f"{ic} on {n}: nearest capacitor {cp.ref} is {d:.1f} mm from the pin (over {warn_mm} mm)", ref=ic, net=n,
+                                  value=round(d, 2), limit=warn_mm, x_mm=cp.x, y_mm=cp.y))
+            # the capacitor's other pad must reach ground at once
+            if cp.ref in checked_caps:
+                continue
+            checked_caps.add(cp.ref)
+            gp = next((p for p in pos[cp.ref].pads if p is not cp and p.net and re.search(r"GND|VSS", p.net, re.IGNORECASE)), None)
+            if gp is None:
+                continue
+            layer = next((l for l in gp.layers if l.endswith(".Cu") and "*" not in l), "F.Cu")
+            near_via = min((math.hypot(v.x - gp.x, v.y - gp.y) for v in gnd_vias), default=99.0)
+            pour = fills.covered(gp.x, gp.y, layer, {gp.net}) is not None
+            if near_via > gnd_via_mm and not pour:
+                f.append(_finding("decoupling", "warning", f"{cp.ref}'s ground pad has no via within {gnd_via_mm} mm (nearest {near_via:.1f} mm) and no ground pour under it",
+                                  ref=cp.ref, net=gp.net, value=round(near_via, 2), limit=gnd_via_mm, x_mm=gp.x, y_mm=gp.y))
+    unfilled = "" if not any(z.fill_requested and not z.filled for z in bm.zones) else "; zones unfilled in the file, so pours under pads were not seen"
+    return _check("decoupling", name, f, f"{how}; distance pad to pad; ground vias within {gnd_via_mm} mm or a pour{unfilled}",
+                  limit_source="kicad-happy EMC rule DC-001: over 8 mm high, over 5 mm medium; ground via at the pad per common layout practice",
+                  summary="every IC supply pin has a capacitor within 5 mm with a short ground return" if not f else f"{len(f)} item(s) to look at",
+                  data={"nearest": data})
+
+
+# pairs by name that are not controlled-impedance interfaces: class D speaker outputs, motor phases, LED strings
+LOW_SPEED_PAIR = re.compile(r"SPK|SPEAKER|MOT|COIL|LED|BTL|OUT|AUDIO|LINE|PWR|BAT|HP_|SENSE|SHUNT", re.IGNORECASE)
+HIGH_SPEED_PAIR = re.compile(r"USB|ETH|MDI|RGMII|SGMII|MIPI|DSI|CSI|PCIE|HDMI|TMDS|LVDS|SATA|DP_|CAN|RS485|CLK", re.IGNORECASE)
+USB_FS_SKEW_MM = 25.0
 
 
 def check_diff_pairs(bm: BoardModel, project_file: Path | None) -> ReviewCheck:
@@ -611,17 +719,35 @@ def check_diff_pairs(bm: BoardModel, project_file: Path | None) -> ReviewCheck:
     if not rep.pairs:
         return _info("diff_pairs", "Differential pairs", "no differential pairs found by name", "net names ending in _P/_N, _DP/_DN, +/-")
     findings: list[ReviewFinding] = []
+    skipped: list[str] = []
+    real = []
     for p in rep.pairs:
+        if LOW_SPEED_PAIR.search(p.name) and not HIGH_SPEED_PAIR.search(p.name):
+            skipped.append(p.name)
+            continue
+        real.append(p)
+    for p in real:
+        usb2 = bool(re.search(r"USB", p.name, re.IGNORECASE)) and not re.search(r"USB3|SS|TX|RX", p.name, re.IGNORECASE)
         if p.status == "warn":
             reasons = "; ".join(n for n in p.notes if not n.startswith("CM5 datasheet"))
-            findings.append(_finding("diff_pairs", "warning", f"{p.name}: {reasons}", net=p.p_net, value=p.skew_mm, limit=p.skew_limit_mm))
+            if usb2 and (p.skew_mm or 0.0) <= USB_FS_SKEW_MM:
+                findings.append(_finding("diff_pairs", "info", f"{p.name}: {reasons}. Fine for USB 2.0 full speed (12 Mbit/s); high speed needs 90 ohm and the halves coupled",
+                                         net=p.p_net, value=p.skew_mm, limit=p.skew_limit_mm))
+            else:
+                findings.append(_finding("diff_pairs", "warning", f"{p.name}: {reasons}", net=p.p_net, value=p.skew_mm, limit=p.skew_limit_mm))
         elif p.status == "partial":
             findings.append(_finding("diff_pairs", "warning", f"{p.name}: only one half is routed", net=p.p_net))
-    s = rep.summary
-    summary = f"{len(rep.pairs)} pair(s): {s['ok']} ok, {s['warn']} with findings, {s['partial']} half routed, {s['unrouted']} unrouted"
-    verdict = "INFO" if (s["ok"] == 0 and s["warn"] == 0 and s["partial"] == 0) else None
+    if skipped:
+        findings.append(_finding("diff_pairs", "info", f"named like pairs but not a high-speed interface, not checked: {', '.join(skipped)}"))
+    if not real:
+        return _info("diff_pairs", "Differential pairs", f"no high-speed pairs; skipped {', '.join(skipped)}", "net names", data={"skipped": skipped})
+    s_ = {"ok": sum(1 for p in real if p.status == "ok"), "warn": sum(1 for p in real if p.status == "warn"),
+          "partial": sum(1 for p in real if p.status == "partial"), "unrouted": sum(1 for p in real if p.status == "unrouted")}
+    summary = f"{len(real)} pair(s): {s_['ok']} ok, {s_['warn']} with findings, {s_['partial']} half routed, {s_['unrouted']} unrouted" + (f"; {len(skipped)} skipped" if skipped else "")
+    verdict = "INFO" if (s_["ok"] == 0 and s_["warn"] == 0 and s_["partial"] == 0) else None
     return _check("diff_pairs", "Differential pairs", findings, "route_check: lengths from track segments plus 1.6 mm per via; gap and width from the project's net classes", summary,
-                  limit_source="CM5 datasheet sections 2.2 to 2.5: Ethernet and MIPI within 0.15 mm, PCIe and USB 3.0 within 0.1 mm, USB 2.0 within 0.15 mm", verdict=verdict)
+                  limit_source="CM5 datasheet sections 2.2 to 2.5: Ethernet and MIPI within 0.15 mm, PCIe and USB 3.0 within 0.1 mm, USB 2.0 within 0.15 mm; "
+                  "USB 2.0 full speed tolerates far more (bit time 83 ns)", verdict=verdict, data={"skipped": skipped})
 
 
 def board_info(bm: BoardModel) -> ReviewCheck:
@@ -766,9 +892,22 @@ def schematic_checks(root: Path) -> list[ReviewCheck]:
                 ic_nets.setdefault(node.ref, set()).add(net.name)
             if node.ref.startswith("C"):
                 cap_nets.add(net.name)
-    f = [_finding("decoupling_sch", "warning", f"{ic} power net {n} has no capacitor", ref=ic, net=n) for ic, nets in sorted(ic_nets.items()) for n in sorted(nets)
-         if n not in cap_nets and not re.search(r"GND|VSS", n, re.IGNORECASE)]
-    out.append(_check("decoupling_sch", "Decoupling present in the schematic", f, f"{len(ic_nets)} IC(s) with power_in pins", summary="every IC power net has a capacitor" if not f else f"{len(f)} IC power net(s) without a capacitor"))
+    how = "power_in pins"
+    if not ic_nets:
+        # symbols drawn with passive pins: an IC's pins on supply-named nets stand in
+        how = "IC pins on supply-named nets (no power_in pins in the netlist)"
+        for net in nl.nets:
+            if POWER_NET.search(net.name) and not re.search(r"GND|VSS|ADC|SENS|DIV|_FB|FB_|REF|_DET", net.name, re.IGNORECASE):
+                for node in net.nodes:
+                    if node.ref.startswith("U"):
+                        ic_nets.setdefault(node.ref, set()).add(net.name)
+    if not ic_nets:
+        out.append(_unverified("decoupling_sch", "Decoupling present in the schematic", "no IC supply pins identified (no power_in pins, no IC on a supply-named net)"))
+    else:
+        f = [_finding("decoupling_sch", "warning", f"{ic} power net {n} has no capacitor", ref=ic, net=n) for ic, nets in sorted(ic_nets.items()) for n in sorted(nets)
+             if n not in cap_nets and not re.search(r"GND|VSS", n, re.IGNORECASE)]
+        out.append(_check("decoupling_sch", "Decoupling present in the schematic", f, f"{len(ic_nets)} IC(s), by {how}",
+                          summary="every IC power net has a capacitor" if not f else f"{len(f)} IC power net(s) without a capacitor"))
     # bill of materials summary
     by_prefix: dict[str, int] = {}
     for c in comps:
@@ -818,14 +957,24 @@ def _counts(checks: list[ReviewCheck]) -> dict[str, int]:
     }
 
 
-def review_board(board: Path, *, fab: str = "jlcpcb", parity: bool = True) -> ReviewReport:
+def review_board(board: Path, *, fab: str = "jlcpcb", parity: bool = True, currents: dict[str, float] | None = None, fast_nets: list[str] | None = None,
+                 layout: bool = True) -> ReviewReport:
+    """DRC, fab limits and the layout rules. ``currents`` (net -> A) sizes power tracks and vias; ``fast_nets`` (globs) adds
+    nets to the name-based fast-net list; ``layout=False`` keeps to the DRC and fab checks."""
     t0 = time.time()
     bm = load_board(board)
     project = locate_project(board)
     limits = limits_for(fab, bm.copper_layers)
     checks: list[ReviewCheck] = [board_info(bm)]
     drc, unrouted = check_drc(board, parity and project.root_schematic is not None)
-    checks += [drc, unrouted, check_zone_fills(bm), check_off_board(bm), check_dfm(bm, limits), check_power_track_widths(bm), check_via_stitching(bm), check_decoupling(bm, project), check_diff_pairs(bm, project.project_file)]
+    checks += [drc, unrouted, check_zone_fills(bm), check_off_board(bm), check_dfm(bm, limits)]
+    if layout:
+        from kicad_layer.layout_rules import layout_checks
+
+        rules = layout_checks(bm, currents=currents, fast_nets=fast_nets)
+        checks += rules + [check_decoupling(bm, project), check_diff_pairs(bm, project.project_file)]
+    else:
+        checks += [check_power_track_widths(bm), check_via_stitching(bm), check_decoupling(bm, project), check_diff_pairs(bm, project.project_file)]
     return ReviewReport(target=display(board), kind="board", fab=limits.name, verdict=_overall(checks), counts=_counts(checks), checks=checks,
                         unverified=[c.id for c in checks if c.verdict == "UNVERIFIED"], duration_s=round(time.time() - t0, 1))
 
@@ -837,7 +986,7 @@ def review_schematic(root: Path) -> ReviewReport:
                         unverified=[c.id for c in checks if c.verdict == "UNVERIFIED"], duration_s=round(time.time() - t0, 1))
 
 
-def review_project(path: Path, *, fab: str = "jlcpcb") -> ReviewReport:
+def review_project(path: Path, *, fab: str = "jlcpcb", currents: dict[str, float] | None = None, fast_nets: list[str] | None = None) -> ReviewReport:
     t0 = time.time()
     project = locate_project(path)
     checks: list[ReviewCheck] = []
@@ -847,7 +996,7 @@ def review_project(path: Path, *, fab: str = "jlcpcb") -> ReviewReport:
         checks.append(_unverified("erc", "Electrical rules check", "no schematic in the project"))
     fab_name = limits_for(fab, 2).name
     if project.board is not None:
-        board_report = review_board(project.board, fab=fab, parity=project.root_schematic is not None)
+        board_report = review_board(project.board, fab=fab, parity=project.root_schematic is not None, currents=currents, fast_nets=fast_nets)
         checks += board_report.checks
         fab_name = board_report.fab or fab_name
     else:

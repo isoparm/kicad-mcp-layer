@@ -127,6 +127,22 @@ def outline_pieces(points: list[Point], corner_radius: float = 0.0) -> list[tupl
 EDGE_ITEMS = ("gr_line", "gr_arc", "gr_rect", "gr_poly", "gr_circle", "gr_curve")
 
 
+# ISO metric clearance holes (medium fit) and KiCad's names for them
+_STOCK_HOLES = {2.2: "MountingHole_2.2mm_M2", 2.7: "MountingHole_2.7mm_M2.5", 3.2: "MountingHole_3.2mm_M3", 4.3: "MountingHole_4.3mm_M4",
+                5.3: "MountingHole_5.3mm_M5", 6.4: "MountingHole_6.4mm_M6"}
+
+
+def _library_mounting_hole(drill: float):
+    """KiCad's library footprint for a bare hole of this drill, or None when there is none or the library is missing."""
+    name = _STOCK_HOLES.get(round(drill, 1))
+    if name is None:
+        return None
+    try:
+        return load_footprint("MountingHole", name)
+    except Exception:  # noqa: BLE001 - no KiCad libraries on this machine: fall back to the inline hole
+        return None
+
+
 class BoardFile:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -302,6 +318,15 @@ class BoardFile:
             raise LayerError(EDIT_CONFLICT, f"Reference {ref} already exists on {self.path.name}.")
         plated = pad > drill
         size = pad if plated else drill
+        lib_fp = None if plated else _library_mounting_hole(drill)
+        if lib_fp is not None:
+            # a stock hole: KiCad's own footprint, so DRC's library check finds it identical
+            builder = BoardBuilder(sheetfile="")
+            node = builder.footprint(lib_fp, ref, lib_fp.name, at, 0.0, path_uuid=new_uuid(), pad_nets={}, hide_ref=False)
+            node[:] = [c for c in node if not (isinstance(c, list) and tag(c) in ("path", "sheetname", "sheetfile"))]
+            self._insert_after_last("footprint", to_cnode(node))
+            return self.find(ref)
+        # no library footprint matches: an inline one with no library link, which DRC does not compare
         name = f"MountingHole_{drill:g}mm" + ("_Pad" if plated else "")
         font = S("effects", S("font", S("size", 1, 1), S("thickness", 0.15)))
         small = S("effects", S("font", S("size", 1.27, 1.27)))
@@ -313,7 +338,7 @@ class BoardFile:
             if net:
                 pad_node.append(S("net", net))
         pad_node.append(S("uuid", new_uuid()))
-        fp = S("footprint", f"MountingHole:{name}", S("layer", "F.Cu"), S("uuid", new_uuid()), S("at", at[0], at[1]),
+        fp = S("footprint", name, S("layer", "F.Cu"), S("uuid", new_uuid()), S("at", at[0], at[1]),
                S("descr", f"Mounting hole, drill {drill:g} mm" + (f", pad {pad:g} mm" if plated else ", no annular ring")),
                S("property", "Reference", ref, S("at", 0, -off, 0), S("layer", "F.SilkS"), S("uuid", new_uuid()), font),
                S("property", "Value", name, S("at", 0, off, 0), S("layer", "F.Fab"), S("uuid", new_uuid()), font),

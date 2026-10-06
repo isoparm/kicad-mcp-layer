@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+Field findings from Human Kinetik v0.5 (`docs/field-findings.md`, #21 to #30):
+
+- Layout review (`layout_rules.py`, run by `review_board` unless `layout=False`): `via_in_pad`, `test_points`,
+  `thermal_pads`, `fast_edge`, `stitching` (edge and return vias), `switcher_loop`, `power_tracks` (IPC-2221
+  ampacity from `currents`), `antenna` and `plane_reference`; see `docs/review-checks.md`. `review_board` and
+  `review_project` take `currents` and `fast_nets`. Shared geometry in `geometry.py` (zone-fill index,
+  point-in-polygon over fractured fills, ampacity).
+- Review false positives fixed: via ring uses the fab's via rule (JLCPCB 0.05 mm absolute, 0.075 mm preferred)
+  instead of the PTH ring; copper to edge is measured against the Edge.Cuts segments, not the bounding box, and
+  an edge connector's overhang is info; decoupling measures pad to pad and checks the capacitor's ground via,
+  and finds supply pins by net name when a symbol marks them passive; low-speed `_P/_N` pairs (speaker, LED)
+  are not diff pairs, USB full speed gets a note, `_DP/_DM` and `D+/D-` pair up; silkscreen findings are
+  aggregated.
+- New `board_check` group (core): `pcb_copper_query` (does a track, via or pad fit here, and what it hits:
+  the pre-write clearance check), `zone_islands` (fill islands per net, isolated ones flagged), `pcb_parity`
+  (schematic vs board: missing, extra, value, footprint and net differences) and `pcb_plot` (a 2-D plot of
+  chosen layers, cropped to a window or around a reference).
+- `route_net` (routers): one connection between two pads or points, grid A* over the copper model with the
+  project's rules, `layer_cost` and `keep_under` (nets not to run beneath, e.g. a USB pair); routes JSON and,
+  with `apply`, the copper in the board.
+- `pcb_set_track_width` (by net, class or layer, with a clearance check per segment), `pcb_swap_footprint`
+  (keeps reference, position, rotation, side, nets and the symbol link), `pcb_silk_tidy` (reference size
+  and stroke to the fab minimum, references moved off pads) and `fp_create` (a footprint from a pad list into
+  a project library, registered in `fp-lib-table`).
+- `autoroute`: pours of excluded nets no longer become keep-outs by default (`pours_as_keepouts`), since a
+  refill moves them; `widen_necks` widens FreeRouting's necked power segments to the class width; copper
+  duplicated over existing tracks is dropped.
+- `run_drc` and `run_erc` take `types` (only these violation types), `offset` (page the list) and
+  `save_report` (a copy beside the board); the DRC parity note points to `pcb_parity`.
+- `render_board`, `export_bom` and the other exports no longer double a relative output folder.
+- `pcb_add_mounting_holes` uses the library `MountingHole_<d>mm_M<n>` footprint for a stock drill, so DRC no
+  longer flags `lib_footprint_mismatch` on every hole.
+
 Field findings from the notch_board (`docs/field-findings.md`): #1 to #19 are fixed below, except BOM
 variants (#13) and the CM5 catalogue in `design/catalog.py` (#15); #20 is open.
 

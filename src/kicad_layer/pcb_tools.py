@@ -410,3 +410,62 @@ def save_board(board_path: str | None) -> BoardEditResult:
     path = _board_path(board_path)
     data = board_write.save(path)
     return _result("ipc", data["board"], "save the open board to disk", {"items": [], "written": data["written"], "size": data["size"], "warnings": ["Saved by KiCad itself; run_drc now reads the current state."]})
+
+
+# --------------------------------------------------------------------------------------
+# clean-up edits: track widths, footprint swaps, reference placement (file channel)
+# --------------------------------------------------------------------------------------
+
+
+def _pro_beside(path: Path) -> Path | None:
+    cand = path.with_suffix(".kicad_pro")
+    return cand if cand.is_file() else None
+
+
+def set_track_width(board_path: str | None, *, nets: list[str] | None = None, netclasses: list[str] | None = None, width: float | None = None,
+                    only_narrower: bool = True, dry_run: bool = False, force: bool = False) -> BoardEditResult:
+    from kicad_layer import board_fix
+
+    if width is not None and width <= 0:
+        raise LayerError(INVALID_ARGUMENT, "width must be positive.")
+    pick = _file_only(board_path, "pcb_set_track_width", force=force)
+    path = pick.path
+    what = ", ".join((nets or []) + [f"class {c}" for c in (netclasses or [])])
+    summary = f"track width {'to ' + str(width) + ' mm' if width else 'to each net minimum'} on {what}"
+    return _file_edit(path, summary, lambda bf: board_fix.set_track_width(bf, nets=nets, netclasses=netclasses, width=width, only_narrower=only_narrower, pro=_pro_beside(path)),
+                      dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)
+
+
+def swap_footprint(board_path: str | None, ref: str, lib_id: str, *, keep_fields: bool = True, dry_run: bool = False, force: bool = False) -> BoardEditResult:
+    from kicad_layer import board_fix
+
+    pick = _file_only(board_path, "pcb_swap_footprint", force=force)
+    return _file_edit(pick.path, f"swap {ref} to {lib_id}", lambda bf: board_fix.swap_footprint(bf, ref, lib_id, keep_fields=keep_fields),
+                      dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)
+
+
+def silk_tidy(board_path: str | None, *, size: float = 1.0, thickness: float = 0.15, min_size: float = 0.8, refs: list[str] | None = None,
+              dry_run: bool = False, force: bool = False) -> BoardEditResult:
+    from kicad_layer import board_fix
+
+    pick = _file_only(board_path, "pcb_silk_tidy", force=force)
+    return _file_edit(pick.path, f"place references at {size} mm" + (f" for {', '.join(refs)}" if refs else ""),
+                      lambda bf: board_fix.tidy_silkscreen(bf, size=size, thickness=thickness, min_size=min_size, refs=refs),
+                      dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)
+
+
+def apply_routes(board_path: str | None, routes, *, dry_run: bool = False, force: bool = False, summary: str = "") -> BoardEditResult:
+    """Write a Routes object's segments and vias into a board file (file channel)."""
+    pick = _file_only(board_path, "route_net", force=force)
+
+    def edit(bf: BoardFile):
+        items = []
+        for sg in routes.segments:
+            u = bf.add_segment((sg.x1, sg.y1), (sg.x2, sg.y2), width=sg.width, layer=sg.layer, net=sg.net)
+            items.append({"kind": "track", "id": u, "net": sg.net, "layer": sg.layer})
+        for v in routes.vias:
+            u = bf.add_via((v.x, v.y), net=v.net, size=v.size, drill=v.drill)
+            items.append({"kind": "via", "id": u, "net": v.net})
+        return {"items": items}
+
+    return _file_edit(pick.path, summary or "add routed copper", edit, dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)

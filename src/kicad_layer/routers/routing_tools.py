@@ -69,15 +69,59 @@ def drop_nets(routes: Routes, nets: set[str]) -> tuple[Routes, int]:
     return out, len(routes.segments) + len(routes.vias) - len(out.segments) - len(out.vias)
 
 
+def drop_existing(routes: Routes, board: Path, tol: float = 1e-3) -> tuple[Routes, int]:
+    """``routes`` without the segments and vias already on the board (FreeRouting hands back protected wiring too)."""
+    from ..review import load_board
+
+    bm = load_board(board)
+    segs = {(s.net, s.layer, *sorted(((round(s.x1, 3), round(s.y1, 3)), (round(s.x2, 3), round(s.y2, 3))))) for s in bm.segments}
+    vias = {(v.net, round(v.x, 3), round(v.y, 3)) for v in bm.vias}
+    out = Routes()
+    for s in routes.segments:
+        key = (s.net, s.layer, *sorted(((round(s.x1, 3), round(s.y1, 3)), (round(s.x2, 3), round(s.y2, 3)))))
+        if key not in segs:
+            out.segments.append(s)
+    out.vias = [v for v in routes.vias if (v.net, round(v.x, 3), round(v.y, 3)) not in vias]
+    out.nets = {s.net for s in out.segments} | {v.net for v in out.vias}
+    return out, len(routes.segments) + len(routes.vias) - len(out.segments) - len(out.vias)
+
+
+def fix_necks(routes: Routes, board: Path, project: Path | None) -> tuple[int, list[str]]:
+    """Widen new segments the router drew below their net's minimum (class width, board minimum, .kicad_dru) where the
+    wider track keeps every clearance; returns how many were widened and the nets of those left narrow."""
+    from ..design import copper
+
+    pro = project if project is not None and project.exists() else (board.with_suffix(".kicad_pro") if board.with_suffix(".kicad_pro").is_file() else None)
+    model = copper.load(board, pro)
+    for s in routes.segments:
+        model.add_segment(s.net, s.layer, (s.x1, s.y1), (s.x2, s.y2), s.width)
+    for v in routes.vias:
+        model.add_via(v.net, v.x, v.y, v.size, v.drill)
+    widened = 0
+    left: dict[str, int] = {}
+    for s in routes.segments:
+        target = model.rules.track(s.net)
+        if s.width >= target - 1e-6:
+            continue
+        if not model.check_segment(s.net, s.layer, (s.x1, s.y1), (s.x2, s.y2), target):
+            s.width = target
+            model.add_segment(s.net, s.layer, (s.x1, s.y1), (s.x2, s.y2), target)
+            widened += 1
+        else:
+            left[s.net] = left.get(s.net, 0) + 1
+    return widened, [f"{n} ({k})" for n, k in sorted(left.items())]
+
+
 def autoroute(board: Path, project: Path | None, *, routes_in: Path | None, routes_out: Path | None, plane_layers: dict[str, str] | None,
               routable_layers: list[str] | None, passes: int, timeout_s: float, exclude_nets: list[str] | None = None,
-              exclude_classes: list[str] | None = None, auto_exclude_ruled_nets: bool = True, force_nets: list[str] | None = None) -> AutorouteReport:
+              exclude_classes: list[str] | None = None, auto_exclude_ruled_nets: bool = True, force_nets: list[str] | None = None,
+              pours_as_keepouts: bool = False, widen_necks: bool = True) -> AutorouteReport:
     existing = _existing(routes_in)
     work = board.with_suffix("")
     dsn_path, ses_path = work.with_name(work.name + ".dsn"), work.with_name(work.name + ".ses")
     opts = dsn_mod.DsnOptions(plane_layers=plane_layers or {}, routable_layers=routable_layers, protect_existing=True,
                               exclude_nets=tuple(exclude_nets or ()), exclude_classes=tuple(exclude_classes or ()),
-                              auto_exclude_ruled_nets=auto_exclude_ruled_nets, force_nets=tuple(force_nets or ()))
+                              auto_exclude_ruled_nets=auto_exclude_ruled_nets, force_nets=tuple(force_nets or ()), pours_as_keepouts=pours_as_keepouts)
     exp = dsn_mod.write_dsn_export(board, dsn_path, project, options=opts)
     run = freerouting.run(dsn_path, ses_path, max_passes=passes, improvement_threshold=0.5, timeout_s=timeout_s, ignore_classes=tuple(exp.ignore_classes))
     new = ses_mod.parse_ses(ses_path)
@@ -85,6 +129,15 @@ def autoroute(board: Path, project: Path | None, *, routes_in: Path | None, rout
     routed_excluded = sorted(({s.net for s in new.segments} | {v.net for v in new.vias}) & set(exp.excluded))
     new, dropped = drop_nets(new, set(exp.excluded))
     warnings = list(exp.warnings)
+    new, already = drop_existing(new, board) if board.is_file() else (new, 0)
+    if already:
+        warnings.append(f"{already} segment(s) and via(s) the session returned were already on the board; left out of the routes JSON.")
+    if widen_necks and new.segments and board.is_file():
+        widened, narrow = fix_necks(new, board, project)
+        if widened:
+            warnings.append(f"{widened} segment(s) the router drew below their net's minimum width were widened to it.")
+        if narrow:
+            warnings.append("Segments still below their net's minimum (no room to widen; DRC will flag them unless a neck-down rule allows them): " + ", ".join(narrow[:12]))
     if dropped:
         names = ", ".join(routed_excluded[:5]) + (", ..." if len(routed_excluded) > 5 else "")
         warnings.append(f"FreeRouting routed excluded nets anyway ({len(routed_excluded)}: {names}); the copper was dropped ({dropped} segments and vias).")

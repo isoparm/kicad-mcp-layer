@@ -231,6 +231,10 @@ class DsnOptions:
     force_nets: tuple[str, ...] = ()  # nets never auto-excluded, whatever the rules say
     pour_width_mm: float = 2.0  # a net wider than this with a zone on it is a pour, not a track
     rules_path: Path | None = None  # the .kicad_dru; default: next to the project or the board
+    # A pour refills around new tracks, so by default its fill is no obstacle: with it, a board-wide ground pour on a
+    # routing layer blocks almost every route (field finding, Human Kinetik v0.5: 92 nets unrouted). True keeps the old
+    # behaviour for pours that must not move (a hand-drawn copper area, a heat spreader).
+    pours_as_keepouts: bool = False
 
 
 @dataclass
@@ -468,8 +472,14 @@ def build_dsn(board: Path, project: Path | None = None, *, options: DsnOptions |
             for l in layers:
                 w(f"    ({kind} {_q(arg)} {_poly(l, pts)})")
             report.keepouts.append(f"{kind} '{arg}' on {', '.join(layers)} from rule '{rule.name}'")
-    # the copper of excluded nets' pours: their fill is an obstacle, their outline only a plane when unfilled
-    for z in children(root, "zone"):
+    # the copper of excluded nets' pours: by default left out (the zone refills around the new tracks); with
+    # pours_as_keepouts their fill is an obstacle and their outline a plane when unfilled
+    if not opt.pours_as_keepouts:
+        poured = sorted({value(z, "net") for z in children(root, "zone") if value(z, "net") in excluded and child(z, "keepout") is None})
+        if poured:
+            report.warnings.append(f"Pours of {', '.join(poured)} are not obstacles for the router: refill the zones after applying the routes "
+                                   "(pcb_refill_zones); pass pours_as_keepouts=True to keep their present fill clear.")
+    for z in children(root, "zone") if opt.pours_as_keepouts else []:
         n = value(z, "net")
         if n not in excluded or child(z, "keepout") is not None:
             continue

@@ -40,10 +40,25 @@ def _new_files(directory: Path, since: float) -> list[Path]:
     return out
 
 
+def relative_target(base: Path, given: str) -> Path:
+    """Where a relative output path points. The tools document paths as workspace-relative, and a model passes the
+    path it was shown (``Project/board/renders/x.png``); joining that onto the design's folder doubled the folders
+    (field finding: renders landed in Project/board/Project/board/renders). So: a path whose first folder exists in
+    the workspace root is workspace-relative, anything else is relative to the design's folder."""
+    from kicad_layer.paths import workspace_root
+
+    candidate = Path(given)
+    if candidate.is_absolute():
+        return candidate
+    first = candidate.parts[0] if candidate.parts else ""
+    if len(candidate.parts) > 1 and (workspace_root() / first).is_dir() and not (base / first).is_dir():
+        return workspace_root() / candidate
+    return base / candidate
+
+
 def _output_dir(base: Path, output_dir: str | None, default_name: str) -> Path:
     if output_dir:
-        candidate = Path(output_dir)
-        target = candidate if candidate.is_absolute() else base / candidate
+        target = relative_target(base, output_dir)
     else:
         target = base / default_name
     resolved = resolve_in_workspace(target, must_exist=False)
@@ -137,8 +152,7 @@ def export_bom(
 ) -> BomResult:
     cli = find_kicad_cli()
     if output_path:
-        target = Path(output_path)
-        csv_path = resolve_in_workspace(target if target.is_absolute() else root_schematic.parent / target, must_exist=False)
+        csv_path = resolve_in_workspace(relative_target(root_schematic.parent, output_path), must_exist=False)
     else:
         csv_path = root_schematic.parent / f"{root_schematic.stem}-bom.csv"
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,8 +203,7 @@ def render_board(
         raise LayerError(INVALID_ARGUMENT, f"quality must be basic, high, user or job_settings, not {quality!r}.")
     cli = find_kicad_cli()
     if output_path:
-        target = Path(output_path)
-        png = resolve_in_workspace(target if target.is_absolute() else board.parent / target, must_exist=False)
+        png = resolve_in_workspace(relative_target(board.parent, output_path), must_exist=False)
     else:
         png = board.parent / "renders" / f"{board.stem}-{side}.png"
     png.parent.mkdir(parents=True, exist_ok=True)

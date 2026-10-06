@@ -33,6 +33,10 @@ class FabLimits:
     min_smd_pad_to_pad_mm: float
     min_board_mm: float
     thickness_options_mm: tuple[float, ...]
+    # Vias have their own ring rule, looser than plated holes for components: JLCPCB asks only that the via
+    # diameter exceed the hole by 0.1 mm (0.15 mm preferred), i.e. a ring of 0.05 (0.075) mm.
+    abs_min_via_ring_mm: float = 0.05
+    min_via_ring_mm: float = 0.075             # recommended
 
 
 JLCPCB_2L_1OZ = FabLimits(
@@ -57,6 +61,8 @@ JLCPCB_2L_1OZ = FabLimits(
     min_smd_pad_to_pad_mm=0.15,
     min_board_mm=3.0,
     thickness_options_mm=(0.4, 0.6, 0.8, 1.0, 1.2, 1.6, 2.0),
+    abs_min_via_ring_mm=0.05,   # "Via diameter should be 0.1mm (0.15mm preferred) larger than Via hole size" (read 2026-10-06)
+    min_via_ring_mm=0.075,
 )
 
 JLCPCB_4L_1OZ = FabLimits(
@@ -81,6 +87,8 @@ JLCPCB_4L_1OZ = FabLimits(
     min_smd_pad_to_pad_mm=0.15,
     min_board_mm=3.0,
     thickness_options_mm=(0.4, 0.6, 0.8, 1.0, 1.2, 1.6, 2.0),
+    abs_min_via_ring_mm=0.05,
+    min_via_ring_mm=0.075,
 )
 
 # AISLER (Aachen) 4 layers, 35 um copper, ENIG, 0.8 or 1.6 mm. Numbers from the design-rules page and, where the two
@@ -110,6 +118,8 @@ AISLER_4L_35UM = FabLimits(
     min_smd_pad_to_pad_mm=0.125,
     min_board_mm=10.0,
     thickness_options_mm=(0.8, 1.6),
+    abs_min_via_ring_mm=0.10,  # vias: drill 0.25 + 2 x 0.1 ring
+    min_via_ring_mm=0.10,
 )
 
 FABS: dict[str, FabLimits] = {

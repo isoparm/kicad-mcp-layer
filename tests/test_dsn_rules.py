@@ -119,7 +119,7 @@ def test_rules_parse_with_units_and_conditions():
 
 
 def test_export_sorts_every_rule_kind(board):
-    exp = dsn.build_dsn(board, options=dsn.DsnOptions(auto_exclude_ruled_nets=True, exclude_nets=("MT_SW",)))
+    exp = dsn.build_dsn(board, options=dsn.DsnOptions(auto_exclude_ruled_nets=True, exclude_nets=("MT_SW",), pours_as_keepouts=True))
     # a. and b. excluded nets, with the reason
     assert set(exp.excluded) == {"HALL_IP", "HALL_IN", "HV_INPUT", "+BAT", "+3V3", "MT_SW"}
     assert "creepage" in exp.excluded["HALL_IP"] and "disallow" in exp.excluded["HV_INPUT"] and "enclosedByArea" in exp.excluded["+3V3"]
@@ -163,11 +163,25 @@ def test_filled_pour_of_an_excluded_net_is_an_obstacle(board):
     fill = '\t\t(filled_polygon\n\t\t\t(layer "F.Cu")\n\t\t\t(pts\n\t\t\t\t(xy 26.5 6.5) (xy 33.5 6.5) (xy 33.5 33.5) (xy 26.5 33.5)\n\t\t\t)\n\t\t)\n'
     j = text.index("\t\t(polygon", text.index('(name "bat pour")'))
     board.write_text(text[:j] + fill + text[j:], encoding="utf-8")
-    exp = dsn.build_dsn(board, options=dsn.DsnOptions(auto_exclude_ruled_nets=True))
+    exp = dsn.build_dsn(board, options=dsn.DsnOptions(auto_exclude_ruled_nets=True, pours_as_keepouts=True))
     st = child(_root(exp.text), "structure")
     pours = [k for k in children(st, "keepout") if str(k[1]) == "pour +BAT"]
     assert len(pours) == 1 and str(child(pours[0], "polygon")[1]) == "F.Cu"
     assert not any(str(p[1]) == "+BAT" for p in children(st, "plane"))
+
+
+def test_a_pour_refills_so_by_default_it_is_no_obstacle(board):
+    """Field finding (Human Kinetik v0.5): a board-wide ground fill went to FreeRouting as a keep-out and 92 nets stayed
+    unrouted. A pour refills around new tracks, so by default neither its fill nor its outline reaches the router."""
+    text = board.read_text(encoding="utf-8")
+    fill = '\t\t(filled_polygon\n\t\t\t(layer "F.Cu")\n\t\t\t(pts\n\t\t\t\t(xy 26.5 6.5) (xy 33.5 6.5) (xy 33.5 33.5) (xy 26.5 33.5)\n\t\t\t)\n\t\t)\n'
+    j = text.index("\t\t(polygon", text.index('(name "bat pour")'))
+    board.write_text(text[:j] + fill + text[j:], encoding="utf-8")
+    exp = dsn.build_dsn(board, options=dsn.DsnOptions(auto_exclude_ruled_nets=True))
+    st = child(_root(exp.text), "structure")
+    assert not [k for k in children(st, "keepout") if str(k[1]).startswith("pour ")]
+    assert not any(str(p[1]) == "+BAT" for p in children(st, "plane"))
+    assert any("refill" in w and "+BAT" in w for w in exp.warnings)
 
 
 def test_footprint_keepout_zone_is_exported(board):

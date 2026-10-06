@@ -10,6 +10,7 @@ picks the tier: ``core`` (checks, exports, renders, reviews, libraries, document
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 
 from pathlib import Path
@@ -32,6 +33,9 @@ from kicad_layer import project as project_mod
 from kicad_layer import libindex
 from kicad_layer import pcb_tools
 from kicad_layer import review as review_mod
+from kicad_layer import board_query
+from kicad_layer import fpgen
+from kicad_layer import netroute
 from kicad_layer import routing as routing_mod
 from kicad_layer.routers import routing_tools
 from kicad_layer import sch_tools
@@ -40,6 +44,11 @@ from kicad_layer.ipc import board_read
 from kicad_layer.models import (
     LibFetch,
     AutorouteReport,
+    CopperQuery,
+    FootprintCreated,
+    ParityReport,
+    RouteNetReport,
+    ZoneIslands,
     PairRouteReport,
     StitchReport,
     AnnotateResult,
@@ -84,7 +93,7 @@ from kicad_layer.models import (
     RouteReport,
     StackupInfo,
 )
-from kicad_layer.paths import BOARD, display, resolve_in_workspace, root_schematic_for
+from kicad_layer.paths import BOARD, display, locate_project, resolve_in_workspace, root_schematic_for
 
 
 Fab = Annotated[Literal["jlcpcb", "jlcpcb-2l", "jlcpcb-4l"], Field(description="Whose manufacturing limits to check against. jlcpcb picks 2- or 4-layer limits from the board.")]
@@ -132,6 +141,11 @@ SchematicPath = Annotated[
 BoardPath = Annotated[str, Field(description="A .kicad_pcb file, absolute or relative to the workspace.")]
 Summary = Annotated[bool, Field(description="Counts per type and per rule, the worst violations and the unconnected pairs instead of every finding; the full list stays in report_path. Use it on big boards.")]
 Top = Annotated[int, Field(description="With summary: how many worst violations and unconnected pairs to list.", ge=1, le=200)]
+Types = Annotated[list[str] | None, Field(description="List only findings of these KiCad rule keys (clearance, net_conflict, silk_overlap, ...) or categories (violation, unconnected, parity). Counts and verdict still cover everything.")]
+Offset = Annotated[int, Field(description="Skip this many findings (after the types filter) to page through a long list.", ge=0)]
+Currents = Annotated[dict[str, float] | None, Field(description="Net -> current in A, e.g. {'VBUS': 1.5, 'DUMP': 9.6}: power tracks and layer-change vias are sized against it (IPC-2221, 1 oz, 10 C rise).")]
+FastNets = Annotated[list[str] | None, Field(description="Extra fast nets (names or globs) on top of those recognised by name (clocks, USB, SPI, I2S, crystal, Ethernet, ...).")]
+SaveReport = Annotated[bool, Field(description="Also copy the JSON report to reports/<name>-drc.json (or -erc.json) next to the design, so it can be opened from the project folder.")]
 
 
 # Tool groups. The core tier is everything that reads, checks, exports, renders, reviews or documents;
@@ -141,18 +155,20 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "checks": ('run_erc', 'run_drc', 'sch_netlist', 'sch_trace'),
     "exports": ('export_bom', 'export_fab', 'render_board', 'sch_render'),
     "board_read": ('pcb_summary', 'pcb_list_items', 'pcb_net_stats'),
+    "board_check": ('pcb_copper_query', 'zone_islands', 'pcb_parity', 'pcb_plot'),
     "libraries": ('lib_search', 'sym_info', 'fp_info', 'lib_index', 'lib_fetch'),
     "sch_read": ('sch_list_components', 'sch_get_symbol'),
     "sch_edit": ('sch_set_property', 'sch_add_component', 'sch_wire', 'sch_label', 'sch_mark', 'sch_delete', 'sch_annotate'),
-    "pcb_edit": ('pcb_place_footprint', 'pcb_move_footprint', 'pcb_add_track', 'pcb_add_via', 'pcb_add_zone', 'pcb_refill_zones', 'pcb_delete_items', 'pcb_save', 'pcb_move_footprints', 'pcb_set_outline', 'pcb_add_mounting_holes'),
+    "pcb_edit": ('pcb_place_footprint', 'pcb_move_footprint', 'pcb_add_track', 'pcb_add_via', 'pcb_add_zone', 'pcb_refill_zones', 'pcb_delete_items', 'pcb_save', 'pcb_move_footprints', 'pcb_set_outline', 'pcb_add_mounting_holes',
+                 'pcb_set_track_width', 'pcb_swap_footprint', 'pcb_silk_tidy', 'fp_create'),
     "review": ('review_board', 'review_schematic', 'review_project'),
     "signal_integrity": ('route_check', 'impedance_calc', 'stackup_info', 'parts_search'),
-    "routers": ('route_pairs', 'stitch_planes', 'autoroute'),
+    "routers": ('route_pairs', 'stitch_planes', 'autoroute', 'route_net'),
     "docs": ('doc_fetch', 'doc_import', 'doc_list', 'doc_text', 'doc_page', 'doc_sections', 'doc_facts'),
     "jobs": ('job_start', 'job_status', 'job_result'),
 }
 # the tools job_start may run in the background: the ones that can outlast a client's request timeout
-JOB_TOOLS = ("autoroute", "run_drc", "run_erc", "pcb_refill_zones", "render_board", "review_board")
+JOB_TOOLS = ("autoroute", "run_drc", "run_erc", "pcb_refill_zones", "render_board", "review_board", "route_net", "pcb_silk_tidy")
 FULL_ONLY = ('sch_edit', 'pcb_edit', 'routers')
 TOOL_NAMES: tuple[str, ...] = tuple(n for names in GROUPS.values() for n in names)
 
@@ -198,13 +214,16 @@ def _register_checks(mcp: MCPServer) -> None:
         ] = "all",
         summary: Summary = False,
         top: Top = 20,
+        types: Types = None,
+        offset: Offset = 0,
+        save_report: SaveReport = False,
     ) -> VerdictReport:
         """Run KiCad's Electrical Rules Check on the whole schematic hierarchy with kicad-cli and return
         a verdict (PASS, WARN, FAIL, or UNVERIFIED when no report was produced) with its findings (at most
-        200; summary=true for counts and the worst ones), keyed by stable ids and item UUIDs. Works whether
-        or not KiCad is open."""
+        200; summary=true for counts and the worst ones; types to list only some kinds, offset to page),
+        keyed by stable ids and item UUIDs. Works whether or not KiCad is open."""
         root = root_schematic_for(schematic_path)
-        return reports.run_erc(root, severity=severity, summary=summary, top=top)
+        return reports.run_erc(root, severity=severity, summary=summary, top=top, types=types, offset=offset, save_report=save_report)
 
     @mcp.tool(annotations=READ_ONLY)
     def run_drc(
@@ -214,14 +233,19 @@ def _register_checks(mcp: MCPServer) -> None:
         all_track_errors: Annotated[bool, Field(description="Report every track error instead of the first per track.")] = False,
         summary: Summary = False,
         top: Top = 20,
+        types: Types = None,
+        offset: Offset = 0,
+        save_report: SaveReport = False,
     ) -> VerdictReport:
         """Run KiCad's Design Rules Check on a board with kicad-cli. The verdict counts clearance and
         other violations, unconnected items (unrouted nets), and schematic parity problems; a board with
         unrouted nets is never PASS. At most 200 findings are listed; summary=true gives counts per type
-        and per rule, the worst violations by deficit and the unconnected pairs. Works whether or not
-        KiCad is open."""
+        and per rule, the worst violations by deficit and the unconnected pairs; types lists only some
+        kinds (e.g. ["net_conflict", "clearance"] or a category: violation, unconnected, parity) and offset
+        pages through the rest. Works whether or not KiCad is open."""
         board = resolve_in_workspace(board_path, suffixes=(BOARD,))
-        return reports.run_drc(board, severity=severity, schematic_parity=schematic_parity, all_track_errors=all_track_errors, summary=summary, top=top)
+        return reports.run_drc(board, severity=severity, schematic_parity=schematic_parity, all_track_errors=all_track_errors, summary=summary, top=top,
+                               types=types, offset=offset, save_report=save_report)
 
     @mcp.tool(annotations=READ_ONLY)
     def sch_netlist(
@@ -284,7 +308,7 @@ def _register_exports(mcp: MCPServer) -> None:
         width: Annotated[int, Field(ge=64, le=4096)] = 1600,
         height: Annotated[int, Field(ge=64, le=4096)] = 900,
         quality: Literal["basic", "high", "user", "job_settings"] = "basic",
-        output_path: Annotated[str | None, Field(description="PNG path; default renders/<name>-<side>.png next to the board.")] = None,
+        output_path: Annotated[str | None, Field(description="PNG path; default renders/<name>-<side>.png next to the board. A relative path is taken from the workspace root when its first folder is there, else from the board's folder.")] = None,
     ) -> list:
         """Render the board in 3D to a PNG with kicad-cli and return the image so you can look at it.
         Reads the board file on disk."""
@@ -336,6 +360,76 @@ def _register_board_read(mcp: MCPServer) -> None:
         layers, vias, pads, a hint when a net has pads but no tracks, and differential-pair candidates
         with their length mismatch."""
         return board_read.net_stats(board_path=_open_board_path(board_path), net=net, limit=limit)
+
+
+def _register_board_check(mcp: MCPServer) -> None:
+    @mcp.tool(annotations=READ_ONLY)
+    def pcb_copper_query(
+        board_path: BoardPath,
+        question: Annotated[Literal["region", "clear", "clear_via", "free", "spots"], Field(description="region: what is in rect. clear: would a track through points keep every clearance. clear_via: would a via at (x, y). free: would footprint ref fit at (x, y, rotation). spots: where in rect it fits.")],
+        net: Annotated[str | None, Field(description="clear, clear_via: the net of the new copper.")] = None,
+        layer: Annotated[str | None, Field(description="clear: the copper layer; region: only this layer.")] = None,
+        points: Annotated[list[list[float]] | None, Field(description="clear: the track's points [[x, y], ...] in mm.")] = None,
+        width: Annotated[float | None, Field(description="clear: track width; default the net's class width.")] = None,
+        x: float | None = None,
+        y: float | None = None,
+        size: Annotated[float | None, Field(description="clear_via: via diameter; default the net class's.")] = None,
+        drill: float | None = None,
+        ref: Annotated[str | None, Field(description="free, spots: the footprint to try.")] = None,
+        rotation: float | None = None,
+        rect: Annotated[list[float] | None, Field(description="region, spots: [x0, y0, x1, y1] in mm.")] = None,
+    ) -> CopperQuery:
+        """Ask the board's copper before drawing: would this track, via or part keep every clearance, and if
+        not, what does it hit and by how much; what is in this rectangle; where does a part fit. Clearances come
+        from the project's net classes and .kicad_dru (custom clearance and width rules included), holes and the
+        board edge. Reads the file on disk; nothing is written."""
+        board = resolve_in_workspace(board_path, suffixes=(BOARD,))
+        return board_query.copper_query(board, question, net=net, layer=layer, points=points, width=width, x=x, y=y, size=size, drill=drill,
+                                        ref=ref, rotation=rotation, rect=rect)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def zone_islands(
+        board_path: BoardPath,
+        nets: Annotated[list[str] | None, Field(description="Only these nets; default every net with a filled zone.")] = None,
+    ) -> ZoneIslands:
+        """Which pieces of each zone net's copper are joined: fill polygons, pads, vias and tracks in connected
+        groups. A detached group names its pads and area, so an 'unconnected' from DRC becomes 'J801.3 sits on a
+        185 mm2 island of GND on B.Cu at (x, y)'. Dead copper (fill touching nothing of its net) is counted. Needs
+        the zones filled in the file (pcb_refill_zones)."""
+        board = resolve_in_workspace(board_path, suffixes=(BOARD,))
+        return board_query.zone_islands(board, nets)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def pcb_parity(
+        board_path: BoardPath,
+        schematic_path: Annotated[str | None, Field(description="Any sheet of the project; default the root schematic next to the board.")] = None,
+    ) -> ParityReport:
+        """Board against schematic, pin by pin: footprints missing or extra, a symbol pin with no pad of that
+        number (S1 on the symbol, SH on the footprint), a pad no pin names, the net on each side where they differ,
+        a different footprint. DRC's parity check says 'net_conflict' without the pin; this says which."""
+        board = resolve_in_workspace(board_path, suffixes=(BOARD,))
+        root = root_schematic_for(schematic_path) if schematic_path else locate_project(board).root_schematic
+        if root is None:
+            raise LayerError(INVALID_ARGUMENT, "No schematic next to the board; give schematic_path.")
+        return board_query.parity(board, root)
+
+    @mcp.tool(annotations=WRITES_ARTIFACTS, structured_output=False)
+    def pcb_plot(
+        board_path: BoardPath,
+        rect: Annotated[list[float] | None, Field(description="[x0, y0, x1, y1] in mm; default the whole board.")] = None,
+        layers: Annotated[list[str] | None, Field(description="Copper layers to draw; default F.Cu and B.Cu.")] = None,
+        nets: Annotated[list[str] | None, Field(description="Nets drawn bright; everything else faded.")] = None,
+        scale: Annotated[float, Field(description="Pixels per mm.", ge=2, le=200)] = 20.0,
+        fills: Annotated[bool, Field(description="Draw zone fills.")] = True,
+        output_path: Annotated[str | None, Field(description="PNG path; default renders/<name>-plot.png next to the board.")] = None,
+    ) -> list:
+        """A 2-D plot of a board region: tracks with their real widths, pads by shape, vias, zone fills,
+        courtyards, references and the edge, chosen nets highlighted. Cheaper and sharper than a 3-D render for
+        checking a route, a clearance or a fan-out."""
+        board = resolve_in_workspace(board_path, suffixes=(BOARD,))
+        out = resolve_in_workspace(exports.relative_target(board.parent, output_path), must_exist=False) if output_path else board.parent / "renders" / f"{board.stem}-plot.png"
+        png = board_query.plot(board, out, rect=rect, layers=layers, nets=nets, scale=scale, fills=fills)
+        return [f"Plotted {display(board)} to {display(png)}", Image(path=png)]
 
 
 def _register_libraries(mcp: MCPServer) -> None:
@@ -730,6 +824,76 @@ def _register_pcb_edit(mcp: MCPServer) -> None:
         File channel only. Requires write mode."""
         return pcb_tools.add_mounting_holes(board_path, [h.model_dump() for h in holes], dry_run=dry_run, force=force)
 
+    @mcp.tool(annotations=DESIGN_WRITE)
+    def pcb_set_track_width(
+        board_path: BoardPath,
+        nets: Annotated[list[str] | None, Field(description="Net names or globs, e.g. ['VBUS*', 'V5'].")] = None,
+        netclasses: Annotated[list[str] | None, Field(description="Net classes whose tracks to set.")] = None,
+        width: Annotated[float | None, Field(description="New width in mm; omit to use each net's minimum (class width, board minimum, .kicad_dru track_width).", gt=0)] = None,
+        only_narrower: Annotated[bool, Field(description="Only widen tracks narrower than the target; never narrow a wider one.")] = True,
+        dry_run: DryRun = False,
+        force: Force = False,
+    ) -> BoardEditResult:
+        """Set track widths net by net, segment by segment, only where the new width keeps every clearance
+        (net classes and .kicad_dru); segments that would collide are listed in extra.blocked with what they would
+        hit. The fix for an autorouter's necked-down tracks. File channel only. Requires write mode."""
+        return pcb_tools.set_track_width(board_path, nets=nets, netclasses=netclasses, width=width, only_narrower=only_narrower, dry_run=dry_run, force=force)
+
+    @mcp.tool(annotations=DESIGN_WRITE)
+    def pcb_swap_footprint(
+        board_path: BoardPath,
+        ref: Annotated[str, Field(description="The footprint to replace, by reference.")],
+        lib_id: Annotated[str, Field(description="The library footprint to put in its place, LIBRARY:NAME.")],
+        keep_fields: Annotated[bool, Field(description="Carry the custom fields (MPN, LCSC, ...) over.")] = True,
+        dry_run: DryRun = False,
+        force: Force = False,
+    ) -> BoardEditResult:
+        """Replace a footprint with a library footprint in place: position, rotation, side, reference, value,
+        fields, the link to its schematic symbol and the pad nets (by pad number) carry over; pads that lose
+        their net or come without one are listed. Also clears DRC's 'does not match copy in library'. Change the
+        symbol's Footprint field too (sch_set_property) or parity will report the difference. File channel only."""
+        return pcb_tools.swap_footprint(board_path, ref, lib_id, keep_fields=keep_fields, dry_run=dry_run, force=force)
+
+    @mcp.tool(annotations=DESIGN_WRITE)
+    def pcb_silk_tidy(
+        board_path: BoardPath,
+        size: Annotated[float, Field(description="Text height in mm (JLCPCB wants at least 1.0).", gt=0.4, le=3)] = 1.0,
+        thickness: Annotated[float, Field(description="Stroke in mm (JLCPCB wants at least 0.15).", gt=0.05, le=0.5)] = 0.15,
+        min_size: Annotated[float, Field(description="Smallest height to fall back to where the full size does not fit.", gt=0.4, le=3)] = 0.8,
+        refs: Annotated[list[str] | None, Field(description="Only these references; default every one on F.SilkS.")] = None,
+        dry_run: DryRun = False,
+        force: Force = False,
+    ) -> BoardEditResult:
+        """Place every reference designator on the top silkscreen where it touches no pad (with a margin for the
+        solder mask), no silkscreen line, no other reference and not the board edge, as near its part as it fits:
+        horizontal first, vertical where only that fits, the smaller size last. References with no room are
+        listed and left alone. File channel only. Requires write mode."""
+        return pcb_tools.silk_tidy(board_path, size=size, thickness=thickness, min_size=min_size, refs=refs, dry_run=dry_run, force=force)
+
+    @mcp.tool(annotations=DESIGN_WRITE)
+    def fp_create(
+        project_path: Annotated[str, Field(description="The project (.kicad_pro or its folder) whose library receives the footprint.")],
+        library: Annotated[str, Field(description="Library nickname; the file goes to <project>/<library>.pretty and the library is added to the project's fp-lib-table.")],
+        name: Annotated[str, Field(description="Footprint name, e.g. MB320F_MBF.")],
+        pads: Annotated[list[dict[str, Any]], Field(description="From the datasheet land pattern, one per pad: number, kind (smd | thru_hole | np_thru_hole), shape (rect | roundrect | circle | oval), x, y, w, h, drill (holes), rotation.", min_length=1)],
+        body: Annotated[list[float] | None, Field(description="[width, height] of the package body in mm, centred on the origin, for the fab and silkscreen outlines.")] = None,
+        courtyard_margin: Annotated[float, Field(description="Courtyard clearance around body and pads (IPC-7351 nominal 0.25).", ge=0.05, le=2)] = 0.25,
+        description: str = "",
+        tags: str = "",
+        overwrite: bool = False,
+        dry_run: DryRun = False,
+    ) -> FootprintCreated:
+        """Write a footprint from numbers into a project library: the pads as given, fabrication and silkscreen
+        outlines from the body (silkscreen cut back from the pads), the courtyard around everything, a pin 1 mark
+        and the smd or through-hole attribute; the library is registered in the project's fp-lib-table. For parts
+        no KiCad library carries. Requires write mode."""
+        from kicad_layer.errors import require_write_mode
+
+        require_write_mode("fp_create")
+        proj = locate_project(project_path)
+        return fpgen.create_footprint(proj.directory, library, name, pads, body=body, courtyard_margin=courtyard_margin, description=description,
+                                      tags=tags, overwrite=overwrite, dry_run=dry_run)
+
     # ---- design review ------------------------------------------------------------------
 
 
@@ -739,14 +903,21 @@ def _register_review(mcp: MCPServer) -> None:
         board_path: BoardPath,
         fab: Fab = "jlcpcb",
         schematic_parity: Annotated[bool, Field(description="Include DRC's schematic parity check when a schematic exists.")] = True,
+        currents: Currents = None,
+        fast_nets: FastNets = None,
+        layout: Annotated[bool, Field(description="Run the layout rules (via in pad, test points, thermal pads, fast nets at the edge, stitching, switcher hot loop, antenna keep-out, reference plane). False keeps to DRC and fab limits.")] = True,
     ) -> ReviewReport:
         """Review a board the way a fab and a layout reviewer would: DRC and unrouted connections,
         zone fill state, footprints outside the outline, manufacturability against the fab's
-        published limits (tracks, vias, annular rings, hole spacing, edge clearance, silkscreen),
-        track widths on power nets, zone stitching, and decoupling capacitor distance. Every check
-        reports PASS, WARN, FAIL or UNVERIFIED with its evidence and the source of its limits."""
+        published limits (tracks, via rings by the fab's via rule, hole spacing, exact edge clearance,
+        silkscreen), and the layout rules: no vias in signal pads, test points on rails, ground,
+        programming and buses, thermal vias in exposed pads, fast nets away from the edge, stitching
+        vias, the switching regulator's hot loop, differential pairs (USB D+/D- included), power
+        tracks and vias against the currents given, antenna keep-outs, decoupling capacitors pin to
+        pad with their ground via, and signals over a continuous reference plane (needs filled zones).
+        Every check reports PASS, WARN, FAIL, INFO or UNVERIFIED with its evidence and limit source."""
         board = resolve_in_workspace(board_path, suffixes=(BOARD,))
-        return review_mod.review_board(board, fab=fab, parity=schematic_parity)
+        return review_mod.review_board(board, fab=fab, parity=schematic_parity, currents=currents, fast_nets=fast_nets, layout=layout)
 
     @mcp.tool(annotations=READ_ONLY)
     def review_schematic(
@@ -762,11 +933,13 @@ def _register_review(mcp: MCPServer) -> None:
     def review_project(
         path: Annotated[str, Field(description="A project directory or any file in it.")],
         fab: Fab = "jlcpcb",
+        currents: Currents = None,
+        fast_nets: FastNets = None,
     ) -> ReviewReport:
         """The full review of a project: every schematic check followed by every board check, in
         one report with one verdict and the list of checks that could not run."""
         p = resolve_in_workspace(path)
-        return review_mod.review_project(p, fab=fab)
+        return review_mod.review_project(p, fab=fab, currents=currents, fast_nets=fast_nets)
 
     # ---- routing ------------------------------------------------------------------------
 
@@ -887,6 +1060,8 @@ def _register_routers(mcp: MCPServer) -> None:
         exclude_classes: Annotated[list[str] | None, Field(description="Net classes not to route, the same way.")] = None,
         auto_exclude_ruled_nets: Annotated[bool, Field(description="Also leave out nets that .kicad_dru rules the DSN cannot carry name (creepage, physical clearance, disallow, area or footprint conditions) and pour-width nets with a zone; the result lists them.")] = True,
         force_nets: Annotated[list[str] | None, Field(description="Nets to route even though auto_exclude_ruled_nets would leave them out.")] = None,
+        pours_as_keepouts: Annotated[bool, Field(description="Treat the present fill of excluded nets' pours as obstacles. Default False: a pour refills around new tracks, and a board-wide ground fill would otherwise block almost every route.")] = False,
+        widen_necks: Annotated[bool, Field(description="Widen segments the router drew below their net's minimum width where the wider track keeps every clearance.")] = True,
     ) -> AutorouteReport:
         """Route what is still unrouted with FreeRouting: the board and the routes JSON handed in go out as
         a Specctra DSN with the existing copper protected, the headless router runs (tools/freerouting*.jar
@@ -900,7 +1075,61 @@ def _register_routers(mcp: MCPServer) -> None:
         return routing_tools.autoroute(board, project, routes_in=resolve_in_workspace(routes_in) if routes_in else None,
                                        routes_out=resolve_in_workspace(routes_out, must_exist=False) if routes_out else None,
                                        plane_layers=plane_layers, routable_layers=routable_layers, passes=passes, timeout_s=timeout_s,
-                                       exclude_nets=exclude_nets, exclude_classes=exclude_classes, auto_exclude_ruled_nets=auto_exclude_ruled_nets, force_nets=force_nets)
+                                       exclude_nets=exclude_nets, exclude_classes=exclude_classes, auto_exclude_ruled_nets=auto_exclude_ruled_nets, force_nets=force_nets,
+                                       pours_as_keepouts=pours_as_keepouts, widen_necks=widen_necks)
+
+    @mcp.tool(annotations=WRITES_ARTIFACTS)
+    def route_net(
+        board_path: BoardPath,
+        net: Annotated[str, Field(description="The net to route.")],
+        start: Annotated[str | list[float], Field(description="'REF.PAD' or [x, y] or [x, y, layer].")],
+        end: Annotated[str | list[float], Field(description="'REF.PAD' or [x, y] or [x, y, layer].")],
+        width: Annotated[float | None, Field(description="Track width; default the net's minimum (class, board, .kicad_dru).", gt=0)] = None,
+        layers: Annotated[list[str] | None, Field(description="Copper layers allowed; default all.")] = None,
+        layer_cost: Annotated[dict[str, float] | None, Field(description="Cost factor per layer, e.g. {'B.Cu': 3} to keep a two-layer board's ground plane whole.")] = None,
+        via_cost: Annotated[float, Field(description="Cost of a via in mm of track.", ge=0)] = 6.0,
+        keep_under: Annotated[list[str] | None, Field(description="Nets (a USB pair, a clock) this route must not run beneath on the other layer: crossing them costs under_cost per mm, so it crosses square and short.")] = None,
+        under_cost: Annotated[float, Field(description="Cost per mm of running beneath keep_under nets.", ge=0)] = 25.0,
+        step: Annotated[float, Field(description="Grid in mm.", ge=0.05, le=1.0)] = 0.25,
+        margin: Annotated[float, Field(description="How far beyond the box of the two ends the search may go, in mm.", ge=0.5, le=50)] = 4.0,
+        apply: Annotated[bool, Field(description="Also write the copper into the board file (file channel, write mode).")] = False,
+        routes_out: RoutesOut = None,
+        force: Force = False,
+    ) -> RouteNetReport:
+        """Route one connection of one net with a grid A* over the board's copper, every step checked against
+        the project's clearances (net classes, .kicad_dru, holes, edge). For a rip-up, a review finding or a net
+        FreeRouting left: steer it with layer_cost and keep_under, get the segments and vias as a routes JSON,
+        and write them into the board with apply=True."""
+        from kicad_layer.design import copper as copper_mod
+
+        board = resolve_in_workspace(board_path, suffixes=(BOARD,))
+        pro = board.with_suffix(".kicad_pro") if board.with_suffix(".kicad_pro").is_file() else locate_project(board).project_file
+        model = copper_mod.load(board, pro)
+        a, b = netroute.endpoint(model, start, net), netroute.endpoint(model, end, net)
+        w = width or model.rules.track(net)
+        pts, n = netroute.route_connection(model, net, a, b, width=w, layers=tuple(layers) if layers else None, via_cost=via_cost, layer_cost=layer_cost,
+                                           step=step, margin=margin, keep_under=keep_under, under_cost=under_cost)
+        if pts is None:
+            return RouteNetReport(board=display(board), net=net, status="failed", nodes=n,
+                                  notes=[f"No route from {a.label} to {b.label} within {margin} mm of their box on {', '.join(layers or model.copper)}; "
+                                         "widen margin, allow another layer or a via, or clear the way first (pcb_copper_query region)."])
+        pts = netroute.simplify(model, net, pts, w)
+        vsize, vdrill = model.rules.via(net)
+        r = netroute.to_routes(net, pts, w, vsize, vdrill)
+        out = resolve_in_workspace(routes_out, must_exist=False) if routes_out else board.with_name(f"{board.stem}-route-{re.sub(r'[^A-Za-z0-9_+-]', '_', net)}.json")
+        from kicad_layer import routes as routes_mod
+
+        routes_mod.save(r, out)
+        applied = False
+        notes: list[str] = []
+        if apply:
+            res = pcb_tools.apply_routes(board_path, r, force=force, summary=f"route {net} from {a.label} to {b.label}")
+            applied = res.changed
+            notes += res.warnings
+        length = sum(math.dist((s.x1, s.y1), (s.x2, s.y2)) for s in r.segments)
+        return RouteNetReport(board=display(board), net=net, status="routed", length_mm=round(length, 2), vias=len(r.vias), segments=len(r.segments),
+                              layers=sorted({s.layer for s in r.segments}), routes_path=display(out), applied=applied,
+                              crossings_under=netroute.under_report(model, r, keep_under or []), nodes=n, notes=notes)
 
     # ---- documentation ------------------------------------------------------------------
 
@@ -1131,7 +1360,8 @@ def _register_jobs(mcp: MCPServer, tier: str = "core") -> None:
         return JobResult(id=job.id, tool=job.tool, state="done", elapsed_s=job.elapsed(), result=job.result)
 
 
-REGISTRARS = {"diagnostics": _register_diagnostics, "checks": _register_checks, "exports": _register_exports, "board_read": _register_board_read, "libraries": _register_libraries, "sch_read": _register_sch_read, "sch_edit": _register_sch_edit, "pcb_edit": _register_pcb_edit, "review": _register_review, "signal_integrity": _register_signal_integrity, "routers": _register_routers, "docs": _register_docs, "jobs": _register_jobs}
+REGISTRARS = {"diagnostics": _register_diagnostics, "checks": _register_checks, "exports": _register_exports, "board_read": _register_board_read,
+              "board_check": _register_board_check, "libraries": _register_libraries, "sch_read": _register_sch_read, "sch_edit": _register_sch_edit, "pcb_edit": _register_pcb_edit, "review": _register_review, "signal_integrity": _register_signal_integrity, "routers": _register_routers, "docs": _register_docs, "jobs": _register_jobs}
 
 
 def register_tools(mcp: MCPServer, tier: str = "core") -> None:
