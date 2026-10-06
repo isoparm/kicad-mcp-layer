@@ -34,6 +34,12 @@ Field findings from Human Kinetik v0.5 (`docs/field-findings.md`, #21 to #30):
 - `render_board`, `export_bom` and the other exports no longer double a relative output folder.
 - `pcb_add_mounting_holes` uses the library `MountingHole_<d>mm_M<n>` footprint for a stock drill, so DRC no
   longer flags `lib_footprint_mismatch` on every hole.
+- Fixes from using the new tools on Human Kinetik v0.5 (#31 to #34): `pcb_parity` read the netlist's pin list
+  as objects and reported every part with an empty pin; `route_net` could put a via inside a surface-mount pad
+  (its own net's included), which the review then flags; `pcb_swap_footprint` dropped the old footprint's
+  attributes (a `board_only` mounting hole became an extra footprint for DRC parity) and the place of its
+  reference and value; `pcb_silk_tidy` with `refs` ignored the references it was not moving and put new ones
+  on top of them.
 
 Field findings from the notch_board (`docs/field-findings.md`): #1 to #19 are fixed below, except BOM
 variants (#13) and the CM5 catalogue in `design/catalog.py` (#15); #20 is open.

@@ -521,6 +521,10 @@ test (`tests/test_layout_rules.py`, `tests/test_board_tools.py`).
 | 28 | medium | Missing edits: track width per net, footprint swap keeping the nets, silkscreen tidy, a new footprint from a pad list | `pcb_set_track_width`, `pcb_swap_footprint`, `pcb_silk_tidy`, `fp_create`; their tests |
 | 29 | low | `render_board` with a relative output folder wrote into the folder twice nested; mounting holes added inline drew `lib_footprint_mismatch` | `relative_target`; library mounting holes; `test_relative_output_paths_are_not_doubled`, `test_stock_mounting_hole_comes_from_the_library` |
 | 30 | low | No 2-D view of a few layers around one part; full renders cost a thousand tokens each | `pcb_plot`; `test_plot_writes_a_png` |
+| 31 | high | `pcb_parity` read `Component.pins` (strings) as objects: every part reported with an empty pin | `test_parity_reads_the_netlist_pin_list_as_strings` |
+| 32 | medium | `route_net` changed layer inside a surface-mount pad (a test point, a resistor pad of its own net) | via spots must clear every SMD pad; `test_route_net_puts_no_via_in_a_pad` |
+| 33 | medium | `pcb_swap_footprint` lost `board_only` (DRC parity: extra footprint on H1–H4) and moved the reference to the library's place (clipped by the edge) | attributes, reference and value carried over; `test_swap_footprint_keeps_attributes_and_reference_place` |
+| 34 | low | `pcb_silk_tidy` with `refs` did not see the references left in place and stacked new ones on them | `test_silk_tidy_of_some_references_avoids_the_others` |
 
 The layout review (via in pad, test points, thermal pads, fast signals at the edge, stitching, switcher loop,
 power tracks against current, antenna keep-out, reference plane) came from the author's layout rules list;

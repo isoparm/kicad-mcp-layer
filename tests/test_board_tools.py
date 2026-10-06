@@ -230,3 +230,56 @@ def test_stock_mounting_hole_comes_from_the_library(ws):
     fp = bf.add_mounting_hole((5, 5), drill=3.2)
     odd = bf.add_mounting_hole((45, 5), drill=3.3)
     assert fp.lib_id == "MountingHole:MountingHole_3.2mm_M3" and odd.lib_id == "MountingHole_3.3mm"
+
+
+def test_route_net_puts_no_via_in_a_pad(ws):
+    """A layer change starts beside the pad, not under it (the review flags vias in SMD pads, same net or not)."""
+    b = Board().footprint("TP1", 10, 20, [("1", "S", 0, 0, 1.0, 1.0, "smd", "circle")]).footprint("R1", 30, 20, [("1", "S", 0, 0, 1.0, 1.4), ("2", None, 0, 2.5, 1.0, 1.4)])
+    b.track("X", "F.Cu", 0.25, (20, 1), (20, 39))  # a wall across the top: the route must change layer
+    board = project(ws, b)
+    from kicad_layer.design import copper
+    from kicad_layer import netroute as NR
+
+    m = copper.load(board, ws / "t.kicad_pro")
+    a, z = NR.endpoint(m, "TP1.1", "S"), NR.endpoint(m, "R1.1", "S")
+    pts, _ = NR.route_connection(m, "S", a, z, width=0.25, margin=12)
+    assert pts and any(p[2] == "B.Cu" for p in pts)
+    vias = [(p[0], p[1]) for p, q in zip(pts, pts[1:]) if p[2] != q[2]]
+    pads = [(10, 20, 0.5, 0.5), (30, 20, 0.5, 0.7)]
+    for vx, vy in vias:
+        for px, py, hw, hh in pads:
+            assert abs(vx - px) >= hw + 0.3 - 1e-6 or abs(vy - py) >= hh + 0.3 - 1e-6, (vx, vy)
+
+
+def test_silk_tidy_of_some_references_avoids_the_others(ws):
+    """With refs given, a reference left in place is an obstacle (Human Kinetik: TP11 was put on JP801's reference)."""
+    b = Board(40, 30)
+    b.footprint("R1", 10, 15, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)])
+    b.footprint("R2", 30, 15, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)])
+    board = project(ws, b)
+    t = board.read_text(encoding="utf-8")
+    i = t.index('(property "Reference" "R2" (at 0 -2 0)')
+    board.write_text(t[:i] + '(property "Reference" "R2" (at -17.22 -0.125 0)' + t[i + len('(property "Reference" "R2" (at 0 -2 0)'):], encoding="utf-8")
+    bf = BoardFile(board)
+    data = board_fix.tidy_silkscreen(bf, refs=["R1"])
+    (m,) = data["items"]
+    r2_box = (12.78, 14.875, 2 * 0.92 + 0.2, 1.15 + 0.2)  # R2's reference sits where R1's would go alone
+    w, h = (2 * 0.92 + 0.2, 1.35) if m["rotation_deg"] == 0 else (1.35, 2 * 0.92 + 0.2)
+    assert not (abs(m["x_mm"] - r2_box[0]) < (w + r2_box[2]) / 2 and abs(m["y_mm"] - r2_box[1]) < (h + r2_box[3]) / 2), m
+
+
+def test_swap_footprint_keeps_attributes_and_reference_place(ws):
+    """A board-only mounting hole stays board-only (else DRC parity calls it an extra footprint) and its text stays put."""
+    lib = ("Resistor_SMD", "R_0805_2012Metric")
+    if not _have_lib(*lib):
+        pytest.skip("KiCad footprint libraries not installed")
+    b = Board().footprint("R1", 20, 20, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)], extra="\t\t(attr smd board_only exclude_from_bom)")
+    board = project(ws, b)
+    t = board.read_text(encoding="utf-8").replace('(property "Reference" "R1" (at 0 -2 0)', '(property "Reference" "R1" (at 1.5 -3.25 0)')
+    board.write_text(t, encoding="utf-8")
+    bf = BoardFile(board)
+    board_fix.swap_footprint(bf, "R1", ":".join(lib))
+    bf.save()
+    text = board.read_text(encoding="utf-8")
+    assert "board_only" in text and "exclude_from_bom" in text
+    assert '(property "Reference" "R1" (at 1.5 -3.25 0)' in text

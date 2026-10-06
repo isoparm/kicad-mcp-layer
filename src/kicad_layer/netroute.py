@@ -96,6 +96,17 @@ def route_connection(model, net: str, a: Endpoint, b: Endpoint, *, width: float 
     y0, y1 = min(a.y, b.y) - margin, max(a.y, b.y) + margin
     seg_ok: dict[tuple, bool] = {}
     via_ok: dict[tuple, bool] = {}
+    # a via never lands in a surface-mount pad, its own net's included: solder wicks down an open via
+    # (review's via_in_pad check), so the clearance model, which lets same-net copper touch, is not enough
+    from kicad_layer.design.copper import pad_item
+
+    smd_pads = []
+    for fp in model.bm.footprints:
+        for p in fp.pads:
+            if p.kind == "smd":
+                it = pad_item(p, model.copper)
+                if it is not None:
+                    smd_pads.append(it)
 
     def clear_seg(p, r, layer) -> bool:
         key = (p, r, layer)
@@ -106,7 +117,9 @@ def route_connection(model, net: str, a: Endpoint, b: Endpoint, *, width: float 
     def clear_via(p) -> bool:
         if p not in via_ok:
             via_ok[p] = (not model.check_circle(net, model.copper, p[0], p[1], vsize / 2)
-                         and not model.check_circle(net, model.copper, p[0], p[1], vdrill / 2, is_hole=True) and model.inside_outline(*p))
+                         and not model.check_circle(net, model.copper, p[0], p[1], vdrill / 2, is_hole=True) and model.inside_outline(*p)
+                         and all(it.distance_to_point(*p) >= vsize / 2 for it in smd_pads
+                                 if it.bbox[0] - vsize < p[0] < it.bbox[2] + vsize and it.bbox[1] - vsize < p[1] < it.bbox[3] + vsize))
         return via_ok[p]
 
     def under_pen(p, r, layer) -> float:

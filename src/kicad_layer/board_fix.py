@@ -115,8 +115,23 @@ def swap_footprint(bf: BoardFile, ref: str, lib_id: str, *, keep_fields: bool = 
     for c in new:
         if isinstance(c, list) and tag(c) == "uuid" and old_uuid:
             c[1] = old_uuid
+    new_node = to_cnode(new)
+    # what the board decided about this part stays: its attributes (board_only keeps a mounting hole out of
+    # schematic parity, exclude_from_bom/pos_files) and where its reference and value are drawn
+    old_attr = child(node, "attr")
+    if old_attr is not None:
+        i_new = next((i for i, c in enumerate(new_node) if isinstance(c, list) and tag(c) == "attr"), None)
+        if i_new is None:
+            new_node.append(old_attr)
+        else:
+            new_node[i_new] = old_attr
+    for name_ in ("Reference", "Value"):
+        old_p = next((c for c in children(node, "property") if len(c) > 2 and str(c[1]) == name_), None)
+        i_new = next((i for i, c in enumerate(new_node) if isinstance(c, list) and tag(c) == "property" and len(c) > 2 and str(c[1]) == name_), None)
+        if old_p is not None and i_new is not None:
+            new_node[i_new] = old_p
     idx = bf.root.index(node)
-    bf.root[idx] = to_cnode(new)
+    bf.root[idx] = new_node
     mark_dirty(bf.root)
     warnings = []
     if lost:
@@ -182,6 +197,27 @@ def tidy_silkscreen(bf: BoardFile, *, size: float = 1.0, thickness: float = 0.15
             silk += [(a, b, wd / 2) for a, b in zip(abs_pts, abs_pts[1:])]
     placed: list[tuple[float, float, float, float]] = []
     moved, failed = [], []
+    if refs:
+        # the references that stay where they are are obstacles too
+        for n in children(bf.root, "footprint"):
+            prop = next((p for p in children(n, "property") if len(p) > 2 and str(p[1]) == "Reference"), None)
+            if prop is None or str(prop[2]) in refs or value(prop, "layer") != "F.SilkS":
+                continue
+            if child(prop, "hide") is not None and str(child(prop, "hide")[1]) == "yes":
+                continue
+            at, pat = child(n, "at") or [], child(prop, "at") or []
+            if len(at) < 3 or len(pat) < 3:
+                continue
+            frot = float(at[3]) if len(at) > 3 else 0.0
+            ox, oy = _rot(float(pat[1]), float(pat[2]), frot)
+            ang = float(pat[3]) if len(pat) > 3 else 0.0
+            eff = child(prop, "effects")
+            font = child(eff, "font") if eff is not None else None
+            fs = child(font, "size") if font is not None else None
+            sz = float(fs[2]) if fs is not None and len(fs) > 2 else 1.0
+            tw, th = len(str(prop[2])) * 0.92 * sz + 0.2, sz * 1.15 + 0.2
+            w, h = (th, tw) if round(ang) % 180 == 90 else (tw, th)
+            placed.append((float(at[1]) + ox, float(at[2]) + oy, w, h))
     order = sorted(bm.footprints, key=lambda f: (f.courtyard[2] - f.courtyard[0]) * (f.courtyard[3] - f.courtyard[1]) if f.courtyard else 0.0)
 
     def box_clear(cx, cy, w, h) -> float | None:
