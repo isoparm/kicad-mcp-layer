@@ -283,3 +283,61 @@ def test_swap_footprint_keeps_attributes_and_reference_place(ws):
     text = board.read_text(encoding="utf-8")
     assert "board_only" in text and "exclude_from_bom" in text
     assert '(property "Reference" "R1" (at 1.5 -3.25 0)' in text
+
+
+def test_short_value_keeps_what_a_board_needs():
+    sv = board_fix.short_value
+    assert sv("100nF (VDD)") == "100nF" and sv("10uF 100V X7R") == "10uF 100V" and sv("10k 1%") == "10k"
+    assert sv("Ferrita 600R@100MHz") == "600R" and sv("100k pull-down") == "100k" and sv("Supercap 2.7V D16 (C por definir)") == ""
+
+
+def test_silk_tidy_prints_values_for_passives(ws):
+    """values_for: the value goes on the silkscreen as a user text, the reference to F.Fab, the Value field stays."""
+    b = Board(40, 30)
+    b.footprint("R1", 10, 15, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)])
+    b.footprint("U1", 30, 15, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)])
+    board = project(ws, b)
+    board.write_text(board.read_text(encoding="utf-8").replace('(property "Value" "v"', '(property "Value" "10k 1% (pull-up)"', 1), encoding="utf-8")
+    bf = BoardFile(board)
+    data = board_fix.tidy_silkscreen(bf, size=0.7, thickness=0.12, min_size=0.7, values_for=["R*", "C*"])
+    bf.save()
+    texts = {m["ref"]: m["text"] for m in data["items"]}
+    assert texts == {"R1": "10k", "U1": "U1"}
+    t = board.read_text(encoding="utf-8")
+    assert '(fp_text user "10k"' in t and '(property "Value" "10k 1% (pull-up)"' in t
+    i = t.index('(property "Reference" "R1"')
+    assert '"F.Fab"' in t[i:i + 120]
+    # a second run reuses the label instead of adding another
+    bf = BoardFile(board)
+    board_fix.tidy_silkscreen(bf, size=0.7, thickness=0.12, min_size=0.7, values_for=["R*"])
+    bf.save()
+    assert board.read_text(encoding="utf-8").count('(fp_text user "10k"') == 1
+
+
+def test_silk_tidy_leaves_a_value_with_no_room_as_it_was(ws):
+    """No place for the value: no label on the pads, the reference stays on the silkscreen."""
+    b = Board(4, 3)  # a board too small for any text beside the part
+    b.footprint("R1", 2, 1.5, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)])
+    board = project(ws, b)
+    board.write_text(board.read_text(encoding="utf-8").replace('(property "Value" "v"', '(property "Value" "10k"', 1), encoding="utf-8")
+    bf = BoardFile(board)
+    data = board_fix.tidy_silkscreen(bf, size=1.0, min_size=1.0, reach=0.5, values_for=["R*"])
+    bf.save()
+    t = board.read_text(encoding="utf-8")
+    assert data["failed"] == ["R1"] and "fp_text user" not in t
+    i = t.index('(property "Reference" "R1"')
+    assert '"F.SilkS"' in t[i:i + 120]
+
+
+def test_silk_tidy_keeps_texts_out_of_other_parts_courtyards(ws):
+    """A label under a neighbour's body cannot be read once the board is assembled."""
+    b = Board(40, 30)
+    b.footprint("R1", 10, 15, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)])
+    # a big part to the right with a courtyard and no silkscreen or pads where R1's text would go alone
+    b.footprint("U1", 17, 15, [("1", "C", 3, 3, 0.6, 0.6)], court=(-5.0, -4.0, 5.0, 4.0))
+    board = project(ws, b)
+    bf = BoardFile(board)
+    data = board_fix.tidy_silkscreen(bf, refs=["R1"])
+    (m,) = [i for i in data["items"] if i["ref"] == "R1"]
+    w, h = (2 * 0.92 + 0.2, 1.35) if m["rotation_deg"] == 0 else (1.35, 2 * 0.92 + 0.2)
+    assert m["x_mm"] + w / 2 <= 12.0 + 1e-6 or not (abs(m["y_mm"] - 15) < 4 + h / 2), m

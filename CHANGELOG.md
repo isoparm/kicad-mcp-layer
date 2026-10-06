@@ -34,6 +34,11 @@ Field findings from Human Kinetik v0.5 (`docs/field-findings.md`, #21 to #30):
 - `render_board`, `export_bom` and the other exports no longer double a relative output folder.
 - `pcb_add_mounting_holes` uses the library `MountingHole_<d>mm_M<n>` footprint for a stock drill, so DRC no
   longer flags `lib_footprint_mismatch` on every hole.
+- `pcb_silk_tidy` gains `values_for` (reference patterns such as `R*`, `C*`): those parts print a short value
+  (`10k`, `100nF`, `10uF 100V`; notes, dielectric and tolerance dropped) as a user text on F.SilkS and their
+  reference moves to F.Fab, so the Value field and schematic parity are untouched; and `reach`. A text no longer
+  lands inside another part's courtyard (it would sit under that part's body), and a value with no room leaves the
+  part as it was instead of a label on its pads.
 - Fixes from using the new tools on Human Kinetik v0.5 (#31 to #34): `pcb_parity` read the netlist's pin list
   as objects and reported every part with an empty pin; `route_net` could put a via inside a surface-mount pad
   (its own net's included), which the review then flags; `pcb_swap_footprint` dropped the old footprint's

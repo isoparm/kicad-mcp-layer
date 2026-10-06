@@ -445,12 +445,14 @@ def swap_footprint(board_path: str | None, ref: str, lib_id: str, *, keep_fields
 
 
 def silk_tidy(board_path: str | None, *, size: float = 1.0, thickness: float = 0.15, min_size: float = 0.8, refs: list[str] | None = None,
-              dry_run: bool = False, force: bool = False) -> BoardEditResult:
+              values_for: list[str] | None = None, reach: float = 4.0, dry_run: bool = False, force: bool = False) -> BoardEditResult:
     from kicad_layer import board_fix
 
     pick = _file_only(board_path, "pcb_silk_tidy", force=force)
-    return _file_edit(pick.path, f"place references at {size} mm" + (f" for {', '.join(refs)}" if refs else ""),
-                      lambda bf: board_fix.tidy_silkscreen(bf, size=size, thickness=thickness, min_size=min_size, refs=refs),
+    what = "references" + (f" (values for {', '.join(values_for)})" if values_for else "")
+    return _file_edit(pick.path, f"place {what} at {size} mm" + (f" for {', '.join(refs)}" if refs else ""),
+                      lambda bf: board_fix.tidy_silkscreen(bf, size=size, thickness=thickness, min_size=min_size, refs=refs, values_for=values_for,
+                                                           reach=reach),
                       dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)
 
 

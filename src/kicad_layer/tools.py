@@ -861,14 +861,19 @@ def _register_pcb_edit(mcp: MCPServer) -> None:
         thickness: Annotated[float, Field(description="Stroke in mm (JLCPCB wants at least 0.15).", gt=0.05, le=0.5)] = 0.15,
         min_size: Annotated[float, Field(description="Smallest height to fall back to where the full size does not fit.", gt=0.4, le=3)] = 0.8,
         refs: Annotated[list[str] | None, Field(description="Only these references; default every one on F.SilkS.")] = None,
+        values_for: Annotated[list[str] | None, Field(description="Reference patterns (R*, C*, L*, FB*) whose short value is printed instead of the "
+                                                                 "reference: '10k', '100nF', '10uF 100V'. Their reference moves to F.Fab; the Value field is untouched.")] = None,
+        reach: Annotated[float, Field(description="How far from its part's courtyard a text may go, in mm.", gt=0, le=10)] = 4.0,
         dry_run: DryRun = False,
         force: Force = False,
     ) -> BoardEditResult:
         """Place every reference designator on the top silkscreen where it touches no pad (with a margin for the
-        solder mask), no silkscreen line, no other reference and not the board edge, as near its part as it fits:
-        horizontal first, vertical where only that fits, the smaller size last. References with no room are
-        listed and left alone. File channel only. Requires write mode."""
-        return pcb_tools.silk_tidy(board_path, size=size, thickness=thickness, min_size=min_size, refs=refs, dry_run=dry_run, force=force)
+        solder mask), no silkscreen line, no other text and not the board edge, as near its part as it fits:
+        horizontal first, vertical where only that fits, the smaller size last; or, for the parts in values_for,
+        a short value instead (notes in parentheses, dielectric, tolerance dropped; a capacitor keeps its voltage).
+        Texts with no room are listed and left alone. File channel only. Requires write mode."""
+        return pcb_tools.silk_tidy(board_path, size=size, thickness=thickness, min_size=min_size, refs=refs, values_for=values_for, reach=reach,
+                                   dry_run=dry_run, force=force)
 
     @mcp.tool(annotations=DESIGN_WRITE)
     def fp_create(

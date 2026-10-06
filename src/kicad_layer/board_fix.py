@@ -10,7 +10,9 @@ the copper model of ``design.copper`` (net classes and ``.kicad_dru``) before it
 * ``swap_footprint``   replace a footprint with a library one in place: position, rotation, side,
   reference, value, fields, the schematic link and the pad nets (by pad number) carried over.
 * ``tidy_silkscreen``  place every reference designator on F.SilkS where it touches no pad,
-  silkscreen line, other text or the board edge, nearest its own part.
+  silkscreen line, other text or the board edge, nearest its own part; for the parts named in
+  ``values_for`` a short value ("10k", "100nF", "10uF 100V") is printed instead and the reference
+  moves to F.Fab (the Value field itself is untouched, so schematic parity holds).
 """
 
 from __future__ import annotations
@@ -149,8 +151,63 @@ def _rot(x: float, y: float, deg: float) -> tuple[float, float]:
     return (x * c + y * s, -x * s + y * c)
 
 
+_NOTE = re.compile(r"\s*\([^)]*\)")
+_DROP = re.compile(r"^(X[5-8][RSTPV]|C0G|NP0|Y5V|low-ESR|blindado|bobinado|balanceo|pull-?up|pull-?down|\d+(\.\d+)?%|0\.\d+W|\d+W)$", re.IGNORECASE)
+
+
+def short_value(val: str) -> str:
+    """The part of a Value worth printing next to a passive: no notes in parentheses, no dielectric, tolerance or
+    descriptive words; a capacitor keeps its voltage ("10uF 100V X7R" -> "10uF 100V", "100k (apagado)" -> "100k",
+    "Ferrita 600R@100MHz" -> "600R")."""
+    v = _NOTE.sub("", val).strip()
+    m = re.search(r"(\d+(\.\d+)?[RkKM]?)\s*@", v)  # ferrite: impedance at a frequency
+    if m:
+        return m.group(1)
+    words = [w for w in v.split() if not _DROP.match(w)]
+    words = [w for w in words if re.search(r"\d", w)]  # "Ferrita", "Supercap", ... carry no value
+    if words and re.fullmatch(r"\d+(\.\d+)?V", words[0]):  # a rating with no value ("Supercap 2.7V"): nothing to print
+        return ""
+    return " ".join(words[:2]) if len(words) > 1 and re.search(r"\d+(\.\d+)?V$", words[1]) else (words[0] if words else "")
+
+
+def _text_w(text: str, sz: float) -> float:
+    return len(text) * 0.92 * sz + 0.2
+
+
+def _font_size(t) -> float:
+    eff = child(t, "effects")
+    font = child(eff, "font") if eff is not None else None
+    fs = child(font, "size") if font is not None else None
+    return float(fs[2]) if fs is not None and len(fs) > 2 else 1.0
+
+
+def _silk_texts(n, ref_prop) -> list[tuple[Any, str]]:
+    """The visible F.SilkS texts of a footprint: its reference and any user text (a value label)."""
+    out = []
+    if value(ref_prop, "layer") == "F.SilkS" and not (child(ref_prop, "hide") is not None and str(child(ref_prop, "hide")[1]) == "yes"):
+        out.append((ref_prop, str(ref_prop[2])))
+    for t in children(n, "fp_text"):
+        if len(t) > 2 and str(t[1]) == "user" and value(t, "layer") == "F.SilkS":
+            out.append((t, str(t[2])))
+    return out
+
+
+def _value_label(node, text: str, size: float, thickness: float):
+    """The footprint's user text on F.SilkS that shows its value: the one already there (a re-run), else a new one."""
+    import uuid as _uuid
+
+    for t in children(node, "fp_text"):
+        if len(t) > 2 and str(t[1]) == "user" and value(t, "layer") == "F.SilkS" and str(t[2]) == text:
+            return t
+    t = to_cnode(S("fp_text", Sym("user"), text, S("at", 0, 0, 0), S("layer", "F.SilkS"), S("uuid", str(_uuid.uuid4())),
+                   S("effects", S("font", S("size", size, size), S("thickness", thickness)))))
+    node.append(t)
+    mark_dirty(node)
+    return t
+
+
 def tidy_silkscreen(bf: BoardFile, *, size: float = 1.0, thickness: float = 0.15, min_size: float = 0.8, refs: list[str] | None = None,
-                    margin: float = 0.15, reach: float = 4.0) -> dict[str, Any]:
+                    margin: float = 0.15, reach: float = 4.0, values_for: list[str] | None = None) -> dict[str, Any]:
     """Move each F.SilkS reference to the nearest spot clear of pads (+margin), silkscreen graphics, other references and
     the edge; horizontal first, vertical when that is all that fits; shrink to ``min_size`` only when needed."""
     from kicad_layer.design.copper import copper_layers, edge_segments, pad_item, d_seg_rect
@@ -198,31 +255,36 @@ def tidy_silkscreen(bf: BoardFile, *, size: float = 1.0, thickness: float = 0.15
     placed: list[tuple[float, float, float, float]] = []
     moved, failed = [], []
     if refs:
-        # the references that stay where they are are obstacles too
+        # the texts that stay where they are (references and value labels) are obstacles too
         for n in children(bf.root, "footprint"):
             prop = next((p for p in children(n, "property") if len(p) > 2 and str(p[1]) == "Reference"), None)
-            if prop is None or str(prop[2]) in refs or value(prop, "layer") != "F.SilkS":
+            if prop is None or str(prop[2]) in refs:
                 continue
-            if child(prop, "hide") is not None and str(child(prop, "hide")[1]) == "yes":
-                continue
-            at, pat = child(n, "at") or [], child(prop, "at") or []
-            if len(at) < 3 or len(pat) < 3:
+            at = child(n, "at") or []
+            if len(at) < 3:
                 continue
             frot = float(at[3]) if len(at) > 3 else 0.0
-            ox, oy = _rot(float(pat[1]), float(pat[2]), frot)
-            ang = float(pat[3]) if len(pat) > 3 else 0.0
-            eff = child(prop, "effects")
-            font = child(eff, "font") if eff is not None else None
-            fs = child(font, "size") if font is not None else None
-            sz = float(fs[2]) if fs is not None and len(fs) > 2 else 1.0
-            tw, th = len(str(prop[2])) * 0.92 * sz + 0.2, sz * 1.15 + 0.2
-            w, h = (th, tw) if round(ang) % 180 == 90 else (tw, th)
-            placed.append((float(at[1]) + ox, float(at[2]) + oy, w, h))
+            for t, text in _silk_texts(n, prop):
+                pat = child(t, "at") or []
+                if len(pat) < 3:
+                    continue
+                ox, oy = _rot(float(pat[1]), float(pat[2]), frot)
+                ang = float(pat[3]) if len(pat) > 3 else 0.0
+                sz = _font_size(t)
+                tw, th = _text_w(text, sz), sz * 1.15 + 0.2
+                w, h = (th, tw) if round(ang) % 180 == 90 else (tw, th)
+                placed.append((float(at[1]) + ox, float(at[2]) + oy, w, h))
     order = sorted(bm.footprints, key=lambda f: (f.courtyard[2] - f.courtyard[0]) * (f.courtyard[3] - f.courtyard[1]) if f.courtyard else 0.0)
 
-    def box_clear(cx, cy, w, h) -> float | None:
+    # a text inside another part's courtyard ends up under that part's body once it is assembled
+    courts = [(f.ref, f.courtyard) for f in bm.footprints if f.courtyard and f.layer == "F.Cu"]
+
+    def box_clear(cx, cy, w, h, own: str = "") -> float | None:
         """Smallest clearance of the text box to anything, or None when it overlaps."""
         best = 9.0
+        for r, (x0, y0, x1, y1) in courts:
+            if r != own and cx - w / 2 < x1 and x0 < cx + w / 2 and cy - h / 2 < y1 and y0 < cy + h / 2:
+                return None
         if edges:
             for a, b in edges:
                 d = d_seg_rect(a, b, cx, cy, w, h, 0.0)
@@ -256,14 +318,25 @@ def tidy_silkscreen(bf: BoardFile, *, size: float = 1.0, thickness: float = 0.15
         if not fp.courtyard or fp.layer != "F.Cu":
             continue
         node = bf.find(fp.ref).node
-        prop = next((p for p in children(node, "property") if len(p) > 2 and str(p[1]) == "Reference"), None)
-        if prop is None or value(prop, "layer") != "F.SilkS" or (child(prop, "hide") is not None and str(child(prop, "hide")[1]) == "yes"):
+        ref_prop = next((p for p in children(node, "property") if len(p) > 2 and str(p[1]) == "Reference"), None)
+        if ref_prop is None:
             continue
+        text = fp.ref
+        label = ""
+        if values_for and any(fnmatch.fnmatch(fp.ref, pat) for pat in values_for):
+            label = short_value(next((str(p[2]) for p in children(node, "property") if len(p) > 2 and str(p[1]) == "Value"), ""))
+        if label:  # a part whose value says nothing printable keeps its reference
+            text = label
+            prop = None  # made once a place is found: a label with no room would sit on the pads
+        else:
+            prop = ref_prop
+            if value(prop, "layer") != "F.SilkS" or (child(prop, "hide") is not None and str(child(prop, "hide")[1]) == "yes"):
+                continue
         x0, y0, x1, y1 = fp.courtyard
         cx0, cy0 = (x0 + x1) / 2, (y0 + y1) / 2
         best = None
         for sz in (size, min_size) if min_size < size else (size,):
-            tw, th = len(fp.ref) * 0.92 * sz + 0.2, sz * 1.15 + 0.2
+            tw, th = _text_w(text, sz), sz * 1.15 + 0.2
             for ang in (0, 90):
                 w, h = (tw, th) if ang == 0 else (th, tw)
                 step = 0.25
@@ -280,7 +353,7 @@ def tidy_silkscreen(bf: BoardFile, *, size: float = 1.0, thickness: float = 0.15
                         cost = d + (0.3 if ang else 0.0) + (1.5 if sz < size else 0.0) + (1.0 if inside else 0.0) + 0.05 * min(abs(px - cx0), abs(py - cy0))
                         if d > reach or (best is not None and cost >= best[0]):
                             continue
-                        if box_clear(px, py, w, h) is None:
+                        if box_clear(px, py, w, h, fp.ref) is None:
                             continue
                         best = (cost, px, py, ang, sz, w, h)
             if best:
@@ -290,6 +363,12 @@ def tidy_silkscreen(bf: BoardFile, *, size: float = 1.0, thickness: float = 0.15
             continue
         _, px, py, ang, sz, w, h = best
         placed.append((px, py, w, h))
+        if prop is None:
+            prop = _value_label(node, text, size, thickness)
+            if value(ref_prop, "layer") == "F.SilkS":  # the reference moves to the fabrication layer
+                lay = child(ref_prop, "layer")
+                lay[1] = "F.Fab"
+                mark_dirty(lay)  # type: ignore[arg-type]
         lx, ly = _rot(px - fp.x, py - fp.y, -fp.rotation)
         at = child(prop, "at")
         del at[1:]
@@ -313,6 +392,6 @@ def tidy_silkscreen(bf: BoardFile, *, size: float = 1.0, thickness: float = 0.15
             for j in [c for c in eff if isinstance(c, list) and tag(c) == "justify"]:
                 eff.remove(j)
                 mark_dirty(eff)  # type: ignore[arg-type]
-        moved.append({"ref": fp.ref, "x_mm": round(px, 3), "y_mm": round(py, 3), "rotation_deg": ang, "size_mm": sz})
+        moved.append({"ref": fp.ref, "text": text, "x_mm": round(px, 3), "y_mm": round(py, 3), "rotation_deg": ang, "size_mm": sz})
     warnings = [f"no clear spot within {reach} mm for: {', '.join(failed)}; left as they were"] if failed else []
     return {"items": [{"kind": "text", **m} for m in moved], "placed": len(moved), "failed": failed, "warnings": warnings}
