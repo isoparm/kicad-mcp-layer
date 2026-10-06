@@ -257,8 +257,9 @@ def parity(board: Path, root_schematic: Path) -> ParityReport:
     comps = {c.ref: c for c in nl.components if not c.ref.startswith("#")}
     for c in comps.values():
         for pin in getattr(c, "pins", None) or []:
-            key = (c.ref, str(getattr(pin, "number", getattr(pin, "pin", ""))))
-            sch_pins.setdefault(key, None)
+            num = pin if isinstance(pin, str) else getattr(pin, "number", getattr(pin, "pin", ""))
+            if num:
+                sch_pins.setdefault((c.ref, str(num)), None)
     fps = {fp.ref: fp for fp in bm.footprints}
     issues: list[ParityIssue] = []
     for ref, c in sorted(comps.items()):

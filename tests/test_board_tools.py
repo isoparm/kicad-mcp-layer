@@ -74,6 +74,20 @@ def test_parity_names_the_pin_without_a_pad(ws, monkeypatch):
     assert "SH" in next(i.hint for i in rep.issues if i.pin == "S1")
 
 
+def test_parity_reads_the_netlist_pin_list_as_strings(ws, monkeypatch):
+    """Component.pins is a list of pin numbers; a clean part gives no issue (the Human Kinetik run gave 146)."""
+    b = Board().footprint("R1", 20, 20, [("1", "A", 0, 0, 0.6, 1.0), ("2", "B", 2, 0, 0.6, 1.0)]).footprint("R2", 30, 20, [("1", "A", 0, 0, 0.6, 1.0), ("2", None, 2, 0, 0.6, 1.0)])
+    board = project(ws, b)
+    nl = SimpleNamespace(nets=[SimpleNamespace(name="A", nodes=[SimpleNamespace(ref="R1", pin="1"), SimpleNamespace(ref="R2", pin="1")]),
+                               SimpleNamespace(name="B", nodes=[SimpleNamespace(ref="R1", pin="2")])],
+                         components=[SimpleNamespace(ref="R1", footprint="Test:FP", pins=["1", "2"]), SimpleNamespace(ref="R2", footprint="Test:FP", pins=["1", "2"])])
+    from kicad_layer.cli import netlist as netlist_mod
+
+    monkeypatch.setattr(netlist_mod, "load_netlist", lambda *a, **k: nl)
+    rep = board_query.parity(board, ws / "t.kicad_sch")
+    assert rep.issues == [], rep.issues
+
+
 # ---------------------------------------------------------------- plot
 def test_plot_writes_a_png(ws):
     board = project(ws, _two_pads())
