@@ -34,6 +34,11 @@ Field findings from Human Kinetik v0.5 (`docs/field-findings.md`, #21 to #30):
 - `render_board`, `export_bom` and the other exports no longer double a relative output folder.
 - `pcb_add_mounting_holes` uses the library `MountingHole_<d>mm_M<n>` footprint for a stock drill, so DRC no
   longer flags `lib_footprint_mismatch` on every hole.
+- Tracks are 0.25 mm where they fit: `route_net` and the design package's stub router try 0.25 mm (or the net's
+  minimum if larger) first and fall back to the net's minimum only when the wider track finds no way; `route_net`
+  says so in its notes (`copper.PREFERRED_TRACK_MM`, `Rules.preferred_track`, `netroute.route_preferred`).
+- Pours keep 0.25 mm from other nets' tracks, vias and pads by default: `pcb_add_zone` (new `clearance` parameter),
+  `BoardFile.add_zone`, the board writer and the design package's planes; a net class or rule asking more wins.
 - Silkscreen text is 0.7 mm by default (`pcb_silk_tidy` size and min_size; stroke 0.15 mm), and the project rule
   `min_text_height` of the design package's fab presets and template is 0.7 mm so DRC agrees.
 - `pcb_silk_tidy` gains `values_for` (reference patterns; default `R*`, `C*`, `L*`, `FB*`, `[]` for references only):

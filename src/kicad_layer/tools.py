@@ -743,14 +743,15 @@ def _register_pcb_edit(mcp: MCPServer) -> None:
         net: str,
         layer: str = "F.Cu",
         name: str = "",
+        clearance: Annotated[float, Field(description="Gap from the pour to other nets' tracks, vias and pads, in mm (a net class or rule asking more wins).", ge=0.1, le=5)] = 0.25,
         board_path: EditBoardPath = None,
         channel: Channel = "auto",
         dry_run: DryRun = False,
         force: Force = False,
     ) -> BoardEditResult:
-        """Add a copper pour on a net with thermal-relief pad connections. Fill it afterwards with
-        pcb_refill_zones. Requires write mode."""
-        return pcb_tools.add_zone(board_path, polygon, net=net, layer=layer, name=name, channel=channel, dry_run=dry_run, force=force)
+        """Add a copper pour on a net with thermal-relief pad connections, 0.25 mm from other copper by default.
+        Fill it afterwards with pcb_refill_zones. Requires write mode."""
+        return pcb_tools.add_zone(board_path, polygon, net=net, layer=layer, name=name, clearance=clearance, channel=channel, dry_run=dry_run, force=force)
 
     @mcp.tool(annotations=DESIGN_WRITE)
     def pcb_refill_zones(
@@ -1092,7 +1093,7 @@ def _register_routers(mcp: MCPServer) -> None:
         net: Annotated[str, Field(description="The net to route.")],
         start: Annotated[str | list[float], Field(description="'REF.PAD' or [x, y] or [x, y, layer].")],
         end: Annotated[str | list[float], Field(description="'REF.PAD' or [x, y] or [x, y, layer].")],
-        width: Annotated[float | None, Field(description="Track width; default the net's minimum (class, board, .kicad_dru).", gt=0)] = None,
+        width: Annotated[float | None, Field(description="Track width; default 0.25 mm (or the net's minimum if larger), narrowed to the net's minimum only where 0.25 finds no way.", gt=0)] = None,
         layers: Annotated[list[str] | None, Field(description="Copper layers allowed; default all.")] = None,
         layer_cost: Annotated[dict[str, float] | None, Field(description="Cost factor per layer, e.g. {'B.Cu': 3} to keep a two-layer board's ground plane whole.")] = None,
         via_cost: Annotated[float, Field(description="Cost of a via in mm of track.", ge=0)] = 6.0,
@@ -1114,9 +1115,8 @@ def _register_routers(mcp: MCPServer) -> None:
         pro = board.with_suffix(".kicad_pro") if board.with_suffix(".kicad_pro").is_file() else locate_project(board).project_file
         model = copper_mod.load(board, pro)
         a, b = netroute.endpoint(model, start, net), netroute.endpoint(model, end, net)
-        w = width or model.rules.track(net)
-        pts, n = netroute.route_connection(model, net, a, b, width=w, layers=tuple(layers) if layers else None, via_cost=via_cost, layer_cost=layer_cost,
-                                           step=step, margin=margin, keep_under=keep_under, under_cost=under_cost)
+        pts, n, w, necked = netroute.route_preferred(model, net, a, b, width=width, layers=tuple(layers) if layers else None, via_cost=via_cost,
+                                                     layer_cost=layer_cost, step=step, margin=margin, keep_under=keep_under, under_cost=under_cost)
         if pts is None:
             return RouteNetReport(board=display(board), net=net, status="failed", nodes=n,
                                   notes=[f"No route from {a.label} to {b.label} within {margin} mm of their box on {', '.join(layers or model.copper)}; "
@@ -1129,7 +1129,7 @@ def _register_routers(mcp: MCPServer) -> None:
 
         routes_mod.save(r, out)
         applied = False
-        notes: list[str] = []
+        notes: list[str] = [f"routed at {w} mm, the net's minimum: {model.rules.preferred_track(net)} mm found no way"] if necked else []
         if apply:
             res = pcb_tools.apply_routes(board_path, r, force=force, summary=f"route {net} from {a.label} to {b.label}")
             applied = res.changed

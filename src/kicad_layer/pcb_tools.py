@@ -336,7 +336,8 @@ def add_via(board_path: str | None, x_mm: float, y_mm: float, *, net: str, size:
     return _file_edit(path, summary, edit, dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)
 
 
-def add_zone(board_path: str | None, polygon: list[list[float]], *, net: str, layer: str, name: str = "", channel: str = "auto", dry_run: bool = False, force: bool = False) -> BoardEditResult:
+def add_zone(board_path: str | None, polygon: list[list[float]], *, net: str, layer: str, name: str = "", clearance: float = 0.25, channel: str = "auto",
+             dry_run: bool = False, force: bool = False) -> BoardEditResult:
     require_write_mode("pcb_add_zone")
     pts: list[Point] = [(float(p[0]), float(p[1])) for p in polygon]
     path = _board_path(board_path)
@@ -347,12 +348,12 @@ def add_zone(board_path: str | None, polygon: list[list[float]], *, net: str, la
         if dry_run:
             return _result("ipc", path, summary + " (dry run)", {}, dry_run=True)
         try:
-            return _result("ipc", path, summary, board_write.add_zone(path, pts, net=net, layer=layer, name=name))
+            return _result("ipc", path, summary, board_write.add_zone(path, pts, net=net, layer=layer, name=name, clearance=clearance))
         except Unreachable as exc:
             pick = _fall_back(exc, path, channel, force=force)
 
     def edit(bf: BoardFile):
-        i = bf.add_zone(pts, net=net, layer=layer, name=name)
+        i = bf.add_zone(pts, net=net, layer=layer, name=name, clearance=clearance)
         return {"items": [{"kind": "zone", "id": i, "net": net, "layer": layer, "name": name}]}
 
     return _file_edit(path, summary, edit, dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)

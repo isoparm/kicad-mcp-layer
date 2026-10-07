@@ -371,7 +371,7 @@ class BoardBuilder:
     def via(self, p: Point, *, net: str, size: float = 0.8, drill: float = 0.3, layers: tuple[str, str] = ("F.Cu", "B.Cu")) -> None:
         self.items.append(S("via", S("at", p[0], p[1]), S("size", size), S("drill", drill), S("layers", layers[0], layers[1]), S("net", net), S("uuid", self.ids.make("via", net, p[0], p[1]))))
 
-    def zone(self, *, net: str, layer: str, polygon: list[Point], name: str = "", priority: int = 0, clearance: float = 0.2, min_thickness: float = 0.25) -> None:
+    def zone(self, *, net: str, layer: str, polygon: list[Point], name: str = "", priority: int = 0, clearance: float = 0.25, min_thickness: float = 0.25) -> None:
         z = S("zone", S("net", net), S("layer", layer), S("uuid", self.ids.make("zone", net, layer, name)))
         if name:
             z.append(S("name", name))

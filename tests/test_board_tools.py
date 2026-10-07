@@ -355,3 +355,37 @@ def test_silk_tidy_tool_prints_passive_values_by_default(ws):
     assert [i["text"] for i in res.items] == ["4.7k"]
     res = pcb_tools.silk_tidy(str(board), values_for=[], dry_run=True)
     assert [i["text"] for i in res.items] == ["R1"]
+
+
+def test_route_net_prefers_quarter_millimetre_and_necks_only_when_it_must(ws):
+    """A gap that takes 0.15 mm but not 0.25: the route necks; an open board: 0.25 mm."""
+    from kicad_layer.design import copper
+
+    b = Board(40, 30)
+    b.footprint("R1", 8, 15, [("1", "S", 0, 0, 0.6, 0.6)]).footprint("R2", 32, 15, [("1", "S", 0, 0, 0.6, 0.6)])
+    # two walls of another net with a 0.6 mm gap at y 15: 0.15 + 2 x 0.2 clearance fits, 0.25 + 0.4 does not
+    b.track("X", "F.Cu", 0.2, (20, 0.5), (20, 14.6)).track("X", "F.Cu", 0.2, (20, 15.4), (20, 29.5))
+    board = project(ws, b)
+    pro = ws / "t.kicad_pro"
+    pro.write_text(pro.read_text(encoding="utf-8").replace('"track_width": 0.25', '"track_width": 0.15'), encoding="utf-8")
+    m = copper.load(board, pro)
+    a, z = netroute.endpoint(m, "R1.1", "S"), netroute.endpoint(m, "R2.1", "S")
+    pts, _, w, necked = netroute.route_preferred(m, "S", a, z, layers=("F.Cu",), margin=14)
+    assert pts and w == m.rules.track("S") < 0.25 and necked
+    b2 = Board(40, 30)
+    b2.footprint("R1", 8, 15, [("1", "S", 0, 0, 0.6, 0.6)]).footprint("R2", 32, 15, [("1", "S", 0, 0, 0.6, 0.6)])
+    board2 = project(ws, b2, name="u")
+    pro2 = ws / "u.kicad_pro"
+    pro2.write_text(pro2.read_text(encoding="utf-8").replace('"track_width": 0.25', '"track_width": 0.15'), encoding="utf-8")
+    m2 = copper.load(board2, pro2)
+    pts, _, w, necked = netroute.route_preferred(m2, "S", netroute.endpoint(m2, "R1.1", "S"), netroute.endpoint(m2, "R2.1", "S"), layers=("F.Cu",))
+    assert pts and w == 0.25 and not necked
+
+
+def test_new_pours_keep_a_quarter_millimetre(ws):
+    b = Board(40, 30)
+    board = project(ws, b)
+    bf = BoardFile(board)
+    bf.add_zone([(1, 1), (39, 1), (39, 29), (1, 29)], net="GND", layer="B.Cu")
+    bf.save()
+    assert "(clearance 0.25)" in board.read_text(encoding="utf-8")

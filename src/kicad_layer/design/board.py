@@ -76,7 +76,7 @@ class Text:
 @dataclass(frozen=True)
 class Plane:
     """A poured zone: over the whole board less ``Board.plane_inset``, or over ``polygon``; ``priority`` decides which of
-    two overlapping zones wins, ``clearance`` is the zone's own (None: the writer's 0.2 mm)."""
+    two overlapping zones wins, ``clearance`` is the zone's own (None: the writer's 0.25 mm)."""
 
     layer: str
     net: str

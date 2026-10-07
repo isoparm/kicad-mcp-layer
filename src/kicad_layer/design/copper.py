@@ -108,6 +108,10 @@ def rotate(x: float, y: float, angle: float) -> tuple[float, float]:
 
 
 # ---------------------------------------------------------------- rules
+# 0.25 mm: what a router draws when it can; narrower only where the net's own minimum allows and nothing wider fits
+PREFERRED_TRACK_MM = 0.25
+
+
 @dataclass
 class Rules:
     """What the project file says: net classes with their patterns, the board-wide minimums, and the custom rules of
@@ -192,6 +196,11 @@ class Rules:
         w = float(self.netclass(net).get("track_width", 0.2) or 0.2)
         custom = dru.min_of(self.custom, "track_width", self.facts(net, "Track")) if self.custom else None
         return max(w, self.min_track, custom or 0.0)
+
+    def preferred_track(self, net: str | None) -> float:
+        """The width a router tries first: the net's minimum, but never under PREFERRED_TRACK_MM. A route that only
+        fits narrower falls back to ``track`` (a fine-pitch pad, a crowded fan-out)."""
+        return max(PREFERRED_TRACK_MM, self.track(net))
 
 
 # ---------------------------------------------------------------- the model

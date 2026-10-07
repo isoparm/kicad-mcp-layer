@@ -379,7 +379,7 @@ A pin header with pin 1 at ``at``, running toward +x (``along_x``) or +y.
 
 ### Plane
 
-A poured zone: over the whole board less ``Board.plane_inset``, or over ``polygon``; ``priority`` decides which of two overlapping zones wins, ``clearance`` is the zone's own (None: the writer's 0.2 mm).
+A poured zone: over the whole board less ``Board.plane_inset``, or over ``polygon``; ``priority`` decides which of two overlapping zones wins, ``clearance`` is the zone's own (None: the writer's 0.25 mm).
 
 - `layer: str`
 - `net: str`
@@ -570,6 +570,7 @@ What the project file says: net classes with their patterns, the board-wide mini
 - `disallowed(what: str, net: str | None) -> str | None`: Why a ``via`` or ``track`` of ``net`` breaks a custom rule, or None. A disallow rule whose condition this model cannot evaluate (an area, a footprint) counts as applying: the copper is left to the author.
 - `via(net: str | None) -> tuple[float, float]`
 - `track(net: str | None) -> float`: The class track width, at least the board's minimum and any custom ``track_width`` minimum for the net.
+- `preferred_track(net: str | None) -> float`: The width a router tries first: the net's minimum, but never under PREFERRED_TRACK_MM. A route that only fits narrower falls back to ``track`` (a fine-pitch pad, a crowded fan-out).
 
 ### Item
 

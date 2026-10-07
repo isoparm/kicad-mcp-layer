@@ -398,10 +398,13 @@ def route_stubs(bm: BoardModel, rules: copper.Rules, opens: list[Open], pcb: Pat
             res.skipped += 1
             res.lines.append(f"skipped {o.net}: {why}")
             continue
-        width = rules.track(o.net)
+        width = rules.preferred_track(o.net)
         size, drill = rules.via(o.net)
         t0 = time.perf_counter()
         stub = _route_one(model, o, width, size, drill)
+        if stub is None and rules.track(o.net) < width:  # 0.25 mm where it fits, the net's minimum where it does not
+            width = rules.track(o.net)
+            stub = _route_one(model, o, width, size, drill)
         dt = time.perf_counter() - t0
         if stub is None:
             res.failed += 1

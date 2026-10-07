@@ -388,7 +388,8 @@ def add_via(board_path: Path | None, p: Point, *, net: str, size: float = 0.8, d
     return {"board": path, "items": [_via_row(v) for v in created]}
 
 
-def add_zone(board_path: Path | None, polygon: list[Point], *, net: str, layer: str, name: str = "", min_thickness: float = 0.25) -> dict[str, Any]:
+def add_zone(board_path: Path | None, polygon: list[Point], *, net: str, layer: str, name: str = "", min_thickness: float = 0.25,
+             clearance: float = 0.25) -> dict[str, Any]:
     if len(polygon) < 3:
         raise LayerError(INVALID_ARGUMENT, "A zone needs at least three points.")
     lid = layer_id(layer)
@@ -413,6 +414,10 @@ def add_zone(board_path: Path | None, polygon: list[Point], *, net: str, layer: 
             if name:
                 z.name = name
             z.min_thickness = _nm(min_thickness)
+            try:  # older kicad-python builds have no zone clearance; the net class's then applies
+                z.clearance = _nm(clearance)
+            except (AttributeError, TypeError):
+                pass
         except (AttributeError, TypeError) as exc:
             raise LayerError(IPC_REJECTED, f"Zone creation through the API is not available in this kicad-python build: {exc}",
                              hint="Close the board and use channel='file', then refill with pcb_refill_zones after reopening.") from exc

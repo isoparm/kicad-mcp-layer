@@ -184,6 +184,20 @@ def route_connection(model, net: str, a: Endpoint, b: Endpoint, *, width: float 
     return None, n
 
 
+def route_preferred(model, net: str, a: Endpoint, b: Endpoint, *, width: float | None = None, **kw):
+    """(points, nodes, width, necked): with no width given, the preferred width (0.25 mm or the net's minimum if
+    larger) first, and the net's minimum only when the wider track finds no way."""
+    if width:
+        pts, n = route_connection(model, net, a, b, width=width, **kw)
+        return pts, n, width, False
+    wide, narrow = model.rules.preferred_track(net), model.rules.track(net)
+    pts, n = route_connection(model, net, a, b, width=wide, **kw)
+    if pts is not None or narrow >= wide:
+        return pts, n, wide, False
+    pts, n2 = route_connection(model, net, a, b, width=narrow, **kw)
+    return pts, n + n2, narrow, pts is not None
+
+
 def simplify(model, net: str, pts: list[tuple[float, float, str]], width: float) -> list[tuple[float, float, str]]:
     """Drop collinear points, then shortcut runs on one layer where the straight line keeps every clearance."""
     out = [pts[0]]

@@ -262,7 +262,7 @@ class BoardFile:
         self._insert_after_last("via", make("via", S("at", p[0], p[1]), S("size", size), S("drill", drill), S("layers", "F.Cu", "B.Cu"), S("net", net), S("uuid", u)))
         return u
 
-    def add_zone(self, polygon: list[Point], *, net: str, layer: str, name: str = "", clearance: float = 0.2, min_thickness: float = 0.25, priority: int = 0) -> str:
+    def add_zone(self, polygon: list[Point], *, net: str, layer: str, name: str = "", clearance: float = 0.25, min_thickness: float = 0.25, priority: int = 0) -> str:
         if len(polygon) < 3:
             raise LayerError(INVALID_ARGUMENT, "A zone needs at least three points.")
         u = new_uuid()
