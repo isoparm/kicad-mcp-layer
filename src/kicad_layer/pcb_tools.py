@@ -444,9 +444,13 @@ def swap_footprint(board_path: str | None, ref: str, lib_id: str, *, keep_fields
                       dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)
 
 
-def silk_tidy(board_path: str | None, *, size: float = 1.0, thickness: float = 0.15, min_size: float = 0.8, refs: list[str] | None = None,
+def silk_tidy(board_path: str | None, *, size: float = 0.7, thickness: float = 0.15, min_size: float = 0.7, refs: list[str] | None = None,
               values_for: list[str] | None = None, reach: float = 4.0, dry_run: bool = False, force: bool = False) -> BoardEditResult:
+    """values_for None means the default passives (R, C, L, FB); [] prints references everywhere."""
     from kicad_layer import board_fix
+
+    if values_for is None:
+        values_for = list(board_fix.DEFAULT_VALUES_FOR)
 
     pick = _file_only(board_path, "pcb_silk_tidy", force=force)
     what = "references" + (f" (values for {', '.join(values_for)})" if values_for else "")

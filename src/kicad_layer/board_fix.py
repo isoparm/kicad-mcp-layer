@@ -155,6 +155,10 @@ _NOTE = re.compile(r"\s*\([^)]*\)")
 _DROP = re.compile(r"^(X[5-8][RSTPV]|C0G|NP0|Y5V|low-ESR|blindado|bobinado|balanceo|pull-?up|pull-?down|\d+(\.\d+)?%|0\.\d+W|\d+W)$", re.IGNORECASE)
 
 
+# passives print their value, everything else its reference: what an assembler checks against the BOM
+DEFAULT_VALUES_FOR = ["R*", "C*", "L*", "FB*"]
+
+
 def short_value(val: str) -> str:
     """The part of a Value worth printing next to a passive: no notes in parentheses, no dielectric, tolerance or
     descriptive words; a capacitor keeps its voltage ("10uF 100V X7R" -> "10uF 100V", "100k (apagado)" -> "100k",
@@ -206,7 +210,7 @@ def _value_label(node, text: str, size: float, thickness: float):
     return t
 
 
-def tidy_silkscreen(bf: BoardFile, *, size: float = 1.0, thickness: float = 0.15, min_size: float = 0.8, refs: list[str] | None = None,
+def tidy_silkscreen(bf: BoardFile, *, size: float = 0.7, thickness: float = 0.15, min_size: float = 0.7, refs: list[str] | None = None,
                     margin: float = 0.15, reach: float = 4.0, values_for: list[str] | None = None) -> dict[str, Any]:
     """Move each F.SilkS reference to the nearest spot clear of pads (+margin), silkscreen graphics, other references and
     the edge; horizontal first, vertical when that is all that fits; shrink to ``min_size`` only when needed."""

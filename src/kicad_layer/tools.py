@@ -857,20 +857,23 @@ def _register_pcb_edit(mcp: MCPServer) -> None:
     @mcp.tool(annotations=DESIGN_WRITE)
     def pcb_silk_tidy(
         board_path: BoardPath,
-        size: Annotated[float, Field(description="Text height in mm (JLCPCB wants at least 1.0).", gt=0.4, le=3)] = 1.0,
+        size: Annotated[float, Field(description="Text height in mm. 0.7 by default: legible with a 0.15 mm stroke; JLCPCB recommends 1.0, so review_board's fab check notes smaller text.", gt=0.4, le=3)] = 0.7,
         thickness: Annotated[float, Field(description="Stroke in mm (JLCPCB wants at least 0.15).", gt=0.05, le=0.5)] = 0.15,
-        min_size: Annotated[float, Field(description="Smallest height to fall back to where the full size does not fit.", gt=0.4, le=3)] = 0.8,
+        min_size: Annotated[float, Field(description="Smallest height to fall back to where the full size does not fit (equal to size: no fallback).", gt=0.4, le=3)] = 0.7,
         refs: Annotated[list[str] | None, Field(description="Only these references; default every one on F.SilkS.")] = None,
-        values_for: Annotated[list[str] | None, Field(description="Reference patterns (R*, C*, L*, FB*) whose short value is printed instead of the "
-                                                                 "reference: '10k', '100nF', '10uF 100V'. Their reference moves to F.Fab; the Value field is untouched.")] = None,
+        values_for: Annotated[list[str] | None, Field(description="Reference patterns whose short value is printed instead of the reference: '10k', "
+                                                                 "'100nF', '10uF 100V'. Default (null): resistors, capacitors, inductors and "
+                                                                 "ferrites (R*, C*, L*, FB*). [] prints every reference. Their reference moves to "
+                                                                 "F.Fab; the Value field is untouched.")] = None,
         reach: Annotated[float, Field(description="How far from its part's courtyard a text may go, in mm.", gt=0, le=10)] = 4.0,
         dry_run: DryRun = False,
         force: Force = False,
     ) -> BoardEditResult:
         """Place every reference designator on the top silkscreen where it touches no pad (with a margin for the
         solder mask), no silkscreen line, no other text and not the board edge, as near its part as it fits:
-        horizontal first, vertical where only that fits, the smaller size last; or, for the parts in values_for,
-        a short value instead (notes in parentheses, dielectric, tolerance dropped; a capacitor keeps its voltage).
+        horizontal first, vertical where only that fits, the smaller size last. Resistors, capacitors, inductors and
+        ferrites print a short value instead by default (values_for; notes in parentheses, dielectric and
+        tolerance dropped, a capacitor keeps its voltage; a value with nothing printable keeps the reference).
         Texts with no room are listed and left alone. File channel only. Requires write mode."""
         return pcb_tools.silk_tidy(board_path, size=size, thickness=thickness, min_size=min_size, refs=refs, values_for=values_for, reach=reach,
                                    dry_run=dry_run, force=force)

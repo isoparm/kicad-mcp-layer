@@ -55,7 +55,7 @@ adds the schematic and board edit tools and the frozen routers.
 | `pcb_add_mounting_holes` | full | file | design write | Mounting holes as board-only footprints, plated on a net or bare NPTH; KiCad's own footprint for stock M2 to M6 holes |
 | `pcb_set_track_width` | full | file | design write | Widen tracks of nets or classes to a width or each net's minimum, segment by segment, only where clearance allows; the rest listed |
 | `pcb_swap_footprint` | full | file | design write | Replace a footprint with a library one in place, keeping position, side, fields, schematic link and pad nets |
-| `pcb_silk_tidy` | full | file | design write | Place every reference on the top silkscreen clear of pads, silkscreen, other texts and the edge; `values_for` prints passives' short values instead |
+| `pcb_silk_tidy` | full | file | design write | Place every reference on the top silkscreen clear of pads, silkscreen, other texts and the edge; R, C, L and FB print their short value by default (`values_for`, `[]` for references only) |
 | `fp_create` | full | file | design write | A footprint from a datasheet land pattern (pads, body, courtyard, pin 1) into a project library, registered in its fp-lib-table |
 | `review_board` | core | cli | read-only | DRC, unrouted, zone fills, off-board parts, fab limits, and the layout rules: via in pad, test points, thermal pads, fast nets at the edge, stitching, switcher hot loop, diff pairs, power tracks by current, antenna keep-out, decoupling, reference plane |
 | `review_schematic` | core | cli | read-only | ERC, footprints, values, annotation, power sources, decoupling, BOM summary, SPICE status |

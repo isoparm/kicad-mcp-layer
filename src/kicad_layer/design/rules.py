@@ -20,7 +20,7 @@ JLCPCB_4L_1OZ = {
     # hole clearance 0.19: KiCad's GCT USB4105 footprint leaves 0.194 mm between its pegs and the shield pads
     "min_via_annular_width": 0.15, "min_hole_to_hole": 0.45, "min_hole_clearance": 0.19, "min_copper_edge_clearance": 0.3,
     # library footprints draw their fab texts at 0.1 mm; a project's own silk keeps to JLCPCB's 0.15 and the review checks it
-    "min_silk_clearance": 0.0, "min_text_height": 0.8, "min_text_thickness": 0.1, "min_connection": 0.1, "min_microvia_diameter": 0.2,
+    "min_silk_clearance": 0.0, "min_text_height": 0.7, "min_text_thickness": 0.1, "min_connection": 0.1, "min_microvia_diameter": 0.2,
     "min_microvia_drill": 0.1, "min_resolved_spokes": 2, "allow_blind_buried_vias": False, "allow_microvias": False, "max_error": 0.005,
     "solder_mask_to_copper_clearance": 0.0, "use_height_for_length_calcs": True, "min_groove_width": 0.0,
 }
@@ -68,7 +68,7 @@ def jlcpcb_4l(template: Path | None = None, assignments: list[dict] | None = Non
 JLCPCB_2L = {
     "min_clearance": 0.15, "min_track_width": 0.15, "min_via_diameter": 0.6, "min_through_hole_diameter": 0.3,
     "min_via_annular_width": 0.15, "min_hole_to_hole": 0.5, "min_hole_clearance": 0.25, "min_copper_edge_clearance": 0.3,
-    "min_silk_clearance": 0.0, "min_text_height": 0.8, "min_text_thickness": 0.15, "min_connection": 0.15, "min_microvia_diameter": 0.2,
+    "min_silk_clearance": 0.0, "min_text_height": 0.7, "min_text_thickness": 0.15, "min_connection": 0.15, "min_microvia_diameter": 0.2,
     "min_microvia_drill": 0.1, "min_resolved_spokes": 2, "allow_blind_buried_vias": False, "allow_microvias": False, "max_error": 0.005,
     "solder_mask_to_copper_clearance": 0.0, "use_height_for_length_calcs": True, "min_groove_width": 0.0,
 }
@@ -97,7 +97,7 @@ def jlcpcb_2l(template: Path | None = None, assignments: list[dict] | None = Non
 AISLER_4L_35UM = {
     "min_clearance": 0.125, "min_track_width": 0.125, "min_via_diameter": 0.45, "min_through_hole_diameter": 0.25,
     "min_via_annular_width": 0.1, "min_hole_to_hole": 0.3, "min_hole_clearance": 0.25, "min_copper_edge_clearance": 0.3,
-    "min_silk_clearance": 0.0, "min_text_height": 0.8, "min_text_thickness": 0.15, "min_connection": 0.125, "min_microvia_diameter": 0.0,
+    "min_silk_clearance": 0.0, "min_text_height": 0.7, "min_text_thickness": 0.15, "min_connection": 0.125, "min_microvia_diameter": 0.0,
     "min_microvia_drill": 0.0, "min_resolved_spokes": 2, "allow_blind_buried_vias": False, "allow_microvias": False, "max_error": 0.005,
     "solder_mask_to_copper_clearance": 0.0, "use_height_for_length_calcs": True, "min_groove_width": 0.0,
 }

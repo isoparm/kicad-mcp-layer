@@ -341,3 +341,17 @@ def test_silk_tidy_keeps_texts_out_of_other_parts_courtyards(ws):
     (m,) = [i for i in data["items"] if i["ref"] == "R1"]
     w, h = (2 * 0.92 + 0.2, 1.35) if m["rotation_deg"] == 0 else (1.35, 2 * 0.92 + 0.2)
     assert m["x_mm"] + w / 2 <= 12.0 + 1e-6 or not (abs(m["y_mm"] - 15) < 4 + h / 2), m
+
+
+def test_silk_tidy_tool_prints_passive_values_by_default(ws):
+    """The tool's default: R, C, L and FB show their value; [] keeps references everywhere."""
+    from kicad_layer import pcb_tools
+
+    b = Board(40, 30)
+    b.footprint("R1", 10, 15, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)])
+    board = project(ws, b)
+    board.write_text(board.read_text(encoding="utf-8").replace('(property "Value" "v"', '(property "Value" "4.7k"', 1), encoding="utf-8")
+    res = pcb_tools.silk_tidy(str(board), dry_run=True)
+    assert [i["text"] for i in res.items] == ["4.7k"]
+    res = pcb_tools.silk_tidy(str(board), values_for=[], dry_run=True)
+    assert [i["text"] for i in res.items] == ["R1"]

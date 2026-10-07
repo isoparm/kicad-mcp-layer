@@ -34,7 +34,10 @@ Field findings from Human Kinetik v0.5 (`docs/field-findings.md`, #21 to #30):
 - `render_board`, `export_bom` and the other exports no longer double a relative output folder.
 - `pcb_add_mounting_holes` uses the library `MountingHole_<d>mm_M<n>` footprint for a stock drill, so DRC no
   longer flags `lib_footprint_mismatch` on every hole.
-- `pcb_silk_tidy` gains `values_for` (reference patterns such as `R*`, `C*`): those parts print a short value
+- Silkscreen text is 0.7 mm by default (`pcb_silk_tidy` size and min_size; stroke 0.15 mm), and the project rule
+  `min_text_height` of the design package's fab presets and template is 0.7 mm so DRC agrees.
+- `pcb_silk_tidy` gains `values_for` (reference patterns; default `R*`, `C*`, `L*`, `FB*`, `[]` for references only):
+  those parts print a short value
   (`10k`, `100nF`, `10uF 100V`; notes, dielectric and tolerance dropped) as a user text on F.SilkS and their
   reference moves to F.Fab, so the Value field and schematic parity are untouched; and `reach`. A text no longer
   lands inside another part's courtyard (it would sit under that part's body), and a value with no room leaves the
