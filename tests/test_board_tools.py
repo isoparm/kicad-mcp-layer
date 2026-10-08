@@ -389,3 +389,40 @@ def test_new_pours_keep_a_quarter_millimetre(ws):
     bf.add_zone([(1, 1), (39, 1), (39, 29), (1, 29)], net="GND", layer="B.Cu")
     bf.save()
     assert "(clearance 0.25)" in board.read_text(encoding="utf-8")
+
+
+def _ic_with_ep(b: Board, ref: str = "U1", x: float = 20, y: float = 15) -> Board:
+    """A QFN-like part: four signal pads and a 3 x 3 mm exposed GND pad."""
+    pads = [(str(i + 1), "S", -2.5, -1.5 + i, 0.8, 0.4) for i in range(4)] + [("5", "GND", 0, 0, 3.0, 3.0)]
+    return b.footprint(ref, x, y, pads)
+
+
+def test_via_in_pad_is_found_except_an_exposed_pads_own_thermal_vias(ws):
+    from kicad_layer.design import copper
+
+    b = _ic_with_ep(Board(40, 30)).footprint("C1", 10, 15, [("1", "GND", -0.95, 0, 1.0, 1.4), ("2", "S", 0.95, 0, 1.0, 1.4)])
+    board = project(ws, b)
+    m = copper.load(board, ws / "t.kicad_pro")
+    assert copper.via_in_pad(m, "GND", 9.05, 15, 0.6) == "C1.1"  # its own net's pad: still a via in pad
+    assert copper.via_in_pad(m, "GND", 20, 15, 0.6) is None  # a thermal via in the exposed GND pad
+    assert copper.via_in_pad(m, "S", 20, 15, 0.6) == "U1.5"
+    assert copper.via_in_pad(m, "GND", 9.05, 17.5, 0.6) is None
+    assert copper.clear_via(m, "GND", 9.05, 15, 0.6, 0.3)[-1].startswith("NO: inside pad C1.1")
+
+
+def test_add_via_refuses_a_pad_unless_told(ws):
+    from kicad_layer import pcb_tools
+    from kicad_layer.errors import LayerError
+
+    board = project(ws, Board(40, 30).footprint("C1", 10, 15, [("1", "GND", -0.95, 0, 1.0, 1.4), ("2", "S", 0.95, 0, 1.0, 1.4)]))
+    with pytest.raises(LayerError, match="lands in pad C1.1"):
+        pcb_tools.add_via(str(board), 9.05, 15, net="GND", size=0.6, channel="file")
+    res = pcb_tools.add_via(str(board), 9.05, 15, net="GND", size=0.6, allow_in_pad=True, channel="file")
+    assert res.changed
+
+
+def test_freerouting_is_told_no_vias_at_smd_pads(ws):
+    from kicad_layer.routers import dsn
+
+    board = project(ws, Board(40, 30).footprint("R1", 10, 15, [("1", "A", -0.95, 0, 1.0, 1.4), ("2", "B", 0.95, 0, 1.0, 1.4)]))
+    assert "(via_at_smd off)" in dsn.export_dsn(board, ws / "t.kicad_pro")

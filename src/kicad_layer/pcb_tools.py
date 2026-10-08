@@ -315,9 +315,19 @@ def add_track(board_path: str | None, points: list[list[float]], *, width: float
     return _file_edit(path, summary, edit, dry_run=dry_run, force=force or pick.force_save, notes=pick.warnings)
 
 
-def add_via(board_path: str | None, x_mm: float, y_mm: float, *, net: str, size: float = 0.8, drill: float = 0.3, channel: str = "auto", dry_run: bool = False, force: bool = False) -> BoardEditResult:
+def add_via(board_path: str | None, x_mm: float, y_mm: float, *, net: str, size: float = 0.8, drill: float = 0.3, allow_in_pad: bool = False,
+            channel: str = "auto", dry_run: bool = False, force: bool = False) -> BoardEditResult:
     require_write_mode("pcb_add_via")
     path = _board_path(board_path)
+    if not allow_in_pad and path is not None and Path(path).is_file():
+        from kicad_layer.design import copper
+
+        pro = Path(path).with_suffix(".kicad_pro")
+        pad = copper.via_in_pad(copper.load(Path(path), pro if pro.is_file() else None), net, x_mm, y_mm, size)
+        if pad:
+            raise LayerError(INVALID_ARGUMENT, f"A via at ({x_mm}, {y_mm}) lands in pad {pad}: the solder would wick down it.",
+                             hint="Put it beside the pad with a short track (pcb_copper_query clear_via finds a spot); allow_in_pad=True "
+                                  "only for a plugged or tented via the fab is told about. Thermal vias in an exposed pad of the via's own net are allowed.")
     pick = pick_channel(path, channel, force=force)
     ch, path = pick.channel, pick.path
     summary = f"via on {net} at ({x_mm}, {y_mm}) {size}/{drill} mm"

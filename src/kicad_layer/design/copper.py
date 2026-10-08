@@ -611,6 +611,52 @@ def _closest(model: Model, net: str | None, layer: str, a, b, width: float) -> t
     return best
 
 
+def _pad_area(p: PadGeo) -> float:
+    return math.pi * (p.size[0] / 2) ** 2 if p.shape == "circle" else p.size[0] * p.size[1]
+
+
+def exposed_pad(fp: FpGeo) -> PadGeo | None:
+    """The exposed (thermal) pad of an IC package: the largest surface-mount pad of a part with five or more pads,
+    at least 1.5 mm2 and three times the median pad, or one named EP/PAD/EPAD."""
+    from statistics import median
+
+    smd = [p for p in fp.pads if p.kind == "smd" and p.number]
+    if len(smd) < 5:
+        return None
+    named = [p for p in smd if p.number.upper() in ("EP", "PAD", "EPAD", "TP")]
+    if named:
+        return max(named, key=_pad_area)
+    big = max(smd, key=_pad_area)
+    if _pad_area(big) >= 1.5 and _pad_area(big) >= 3 * median(_pad_area(p) for p in smd):
+        return big
+    return None
+
+
+def via_in_pad(model: Model, net: str | None, x: float, y: float, size: float) -> str | None:
+    """The surface-mount pad a via at (x, y) would land in, its own net's included ("R1.2"), or None. A via in a pad
+    wicks the solder away; the one exception is a thermal via in an exposed pad of the via's own net."""
+    if not hasattr(model, "_smd_pads"):
+        pads = []
+        for fp in model.bm.footprints:
+            ep = exposed_pad(fp)
+            for p in fp.pads:
+                if p.kind == "smd":
+                    it = pad_item(p, model.copper)
+                    if it is not None:
+                        pads.append((it, p is ep))
+        model._smd_pads = pads  # type: ignore[attr-defined]
+    r = size / 2
+    for it, is_ep in model._smd_pads:  # type: ignore[attr-defined]
+        x0, y0, x1, y1 = it.bbox
+        if not (x0 - r < x < x1 + r and y0 - r < y < y1 + r):
+            continue
+        if it.distance_to_point(x, y) < r:
+            if is_ep and it.net == net:
+                continue
+            return it.label
+    return None
+
+
 def clear_via(model: Model, net: str, x: float, y: float, size: float | None = None, drill: float | None = None) -> list[str]:
     """Would a via of ``net`` at (x, y) keep every clearance, copper ring and hole both."""
     dsize, ddrill = model.rules.via(net)
@@ -624,6 +670,9 @@ def clear_via(model: Model, net: str, x: float, y: float, size: float | None = N
     v = model.check_circle(net, model.copper, x, y, size / 2) + model.check_circle(net, model.copper, x, y, drill / 2, is_hole=True)
     if v:
         return out + ["NO: violates"] + _violation_lines(_worst_per_item(v))
+    pad = via_in_pad(model, net, x, y, size)
+    if pad:
+        return out + [f"NO: inside pad {pad}; a via in a surface-mount pad takes the solder (only an exposed pad's own thermal vias may)"]
     return out + ["OK: every clearance kept"]
 
 

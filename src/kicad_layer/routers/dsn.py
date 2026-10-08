@@ -519,6 +519,7 @@ def build_dsn(board: Path, project: Path | None = None, *, options: DsnOptions |
     dv, dd = opt.default_via
     via_via = max(dc, (opt.min_hole_to_hole - (dv - dd) + 0.02) * UM)  # so two drills never come closer than the board allows
     w(f"    (rule (width {_num(dw)}) (clearance {_num(dc)}) (clearance {_num(dc)} (type default_smd)) (clearance {_num(dc / 2)} (type smd_smd)) (clearance {_num(via_via)} (type via_via)))")
+    w("    (control (via_at_smd off))")  # no vias in surface-mount pads (solder wicks down an open via)
     w("  )")
     # ---- placement and library
     padstacks: dict[str, tuple[list[str], list[str]]] = {}

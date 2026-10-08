@@ -20,6 +20,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..design.copper import exposed_pad
 from .pairrouter import _pad_rect
 from .plane_cover import PlaneCoverage
 from ..review import BoardModel, PadGeo, load_board
@@ -172,6 +173,9 @@ def stitch_planes(board: Path, project: Path | None = None, *, existing: Routes 
                     for q, r, ref in pads_all:
                         if q is p:
                             continue
+                        if q.net == p.net and q.kind == "smd" and _rect_dist(vx, vy, r) < v_r:
+                            ok, reason = False, f"via in pad {ref}-{q.number}"  # solder wicks down an open via
+                            break
                         if q.net == p.net and q.kind != "np_thru_hole":
                             continue  # same net: touching is fine
                         if not q.net and q.kind == "smd" and ref == f.ref and _rect_dist(p.x, p.y, r) <= max(w, h) / 2:
@@ -225,8 +229,8 @@ def stitch_planes(board: Path, project: Path | None = None, *, existing: Routes 
                     break
                 if placed:
                     break
-            if not placed:
-                # a large pad (an exposed pad) takes the via inside it, off any hole in the pad
+            if not placed and p is exposed_pad(f):
+                # an exposed pad takes thermal vias inside it, off any hole in the pad; no other pad takes a via
                 for (v_size, v_drill), clr in via_options:
                     if placed or min(w, h) < v_size + 0.3:
                         continue

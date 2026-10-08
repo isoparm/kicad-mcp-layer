@@ -729,13 +729,16 @@ def _register_pcb_edit(mcp: MCPServer) -> None:
         net: str,
         size: Annotated[float, Field(gt=0, description="Via diameter in mm.")] = 0.8,
         drill: Annotated[float, Field(gt=0, description="Drill diameter in mm.")] = 0.3,
+        allow_in_pad: Annotated[bool, Field(description="Allow a via inside a surface-mount pad (plugged or tented vias only). Thermal vias in an exposed pad of the via's own net never need it.")] = False,
         board_path: EditBoardPath = None,
         channel: Channel = "auto",
         dry_run: DryRun = False,
         force: Force = False,
     ) -> BoardEditResult:
-        """Add a through via on a net. Requires write mode."""
-        return pcb_tools.add_via(board_path, x_mm, y_mm, net=net, size=size, drill=drill, channel=channel, dry_run=dry_run, force=force)
+        """Add a through via on a net. Refused inside a surface-mount pad (the solder wicks down an open via), except
+        thermal vias in an exposed pad of its own net. Requires write mode."""
+        return pcb_tools.add_via(board_path, x_mm, y_mm, net=net, size=size, drill=drill, allow_in_pad=allow_in_pad, channel=channel, dry_run=dry_run,
+                                 force=force)
 
     @mcp.tool(annotations=DESIGN_WRITE)
     def pcb_add_zone(

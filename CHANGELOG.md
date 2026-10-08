@@ -34,6 +34,11 @@ Field findings from Human Kinetik v0.5 (`docs/field-findings.md`, #21 to #30):
 - `render_board`, `export_bom` and the other exports no longer double a relative output folder.
 - `pcb_add_mounting_holes` uses the library `MountingHole_<d>mm_M<n>` footprint for a stock drill, so DRC no
   longer flags `lib_footprint_mismatch` on every hole.
+- No vias in surface-mount pads, anywhere the layer makes one: `pcb_add_via` refuses a pad (`allow_in_pad` for a
+  plugged or tented via), `pcb_copper_query clear_via` answers NO with the pad, `route_net` and the stub router
+  never change layer in a pad, `stitch_planes` puts a via inside a pad only when it is an exposed pad (thermal
+  vias) and never in a neighbouring same-net pad, and the DSN tells FreeRouting `(via_at_smd off)`. The one
+  exception everywhere: thermal vias in an exposed pad of the via's own net (`copper.exposed_pad`, `copper.via_in_pad`).
 - Tracks are 0.25 mm where they fit: `route_net` and the design package's stub router try 0.25 mm (or the net's
   minimum if larger) first and fall back to the net's minimum only when the wider track finds no way; `route_net`
   says so in its notes (`copper.PREFERRED_TRACK_MM`, `Rules.preferred_track`, `netroute.route_preferred`).

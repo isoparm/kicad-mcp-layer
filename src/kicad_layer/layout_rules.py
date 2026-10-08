@@ -128,19 +128,10 @@ def _pad_area(p: PadGeo) -> float:
 
 
 def exposed_pad(fp: FpGeo) -> PadGeo | None:
-    """The exposed (thermal) pad of an IC package: the largest surface-mount pad of a part with five or more pads,
-    at least 1.5 mm2 and three times the median pad, or one named EP/PAD/EPAD."""
-    smd = [p for p in fp.pads if p.kind == "smd" and p.number]
-    if len(smd) < 5:
-        return None
-    named = [p for p in smd if p.number.upper() in ("EP", "PAD", "EPAD", "TP")]
-    if named:
-        return max(named, key=_pad_area)
-    big = max(smd, key=_pad_area)
-    med = median(_pad_area(p) for p in smd)
-    if _pad_area(big) >= 1.5 and _pad_area(big) >= 3 * med:
-        return big
-    return None
+    """The exposed (thermal) pad of an IC package (see ``design.copper.exposed_pad``)."""
+    from kicad_layer.design.copper import exposed_pad as _ep
+
+    return _ep(fp)
 
 
 def pad_gap(a: PadGeo, b: PadGeo) -> float:

@@ -45,7 +45,7 @@ adds the schematic and board edit tools and the frozen routers.
 | `pcb_place_footprint` | full | ipc or file | design write | Place a library footprint, live as an undo step or into the file |
 | `pcb_move_footprint` | full | ipc or file | design write | Move, rotate or flip a footprint by reference |
 | `pcb_add_track` | full | ipc or file | design write | Track segments through points on one layer |
-| `pcb_add_via` | full | ipc or file | design write | A through via on a net |
+| `pcb_add_via` | full | ipc or file | design write | A through via on a net; refused inside a surface-mount pad unless `allow_in_pad` (an exposed pad's own thermal vias are fine) |
 | `pcb_add_zone` | full | ipc or file | design write | A copper pour on a net |
 | `pcb_refill_zones` | full | ipc or file | design write | Refill zones live, or with kicad-cli on a closed board; refuses without the board's own `.kicad_pro` unless `allow_default_rules` |
 | `pcb_delete_items` | full | ipc or file | design write | Delete items by id, with their kinds checked first |

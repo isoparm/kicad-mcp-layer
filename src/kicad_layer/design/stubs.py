@@ -137,6 +137,8 @@ def _via_spots(model: copper.Model, net: str, p: tuple[float, float], from_layer
                 continue
             if model.check_circle(net, model.copper, v[0], v[1], size / 2) or model.check_circle(net, model.copper, v[0], v[1], drill / 2, is_hole=True):
                 continue
+            if copper.via_in_pad(model, net, v[0], v[1], size):
+                continue
             if r > 0 and model.check_segment(net, from_layer, p, v, width):
                 continue
             out.append(v)
